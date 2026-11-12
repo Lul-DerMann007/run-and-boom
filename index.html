@@ -1057,6 +1057,8 @@ function onData(m) {
   if (m.t === "hello") {
     net.otherName = String(m.name || "").slice(0, MAX_NAME_LENGTH) || (net.role === "host" ? "Spieler 2" : "Spieler 1");
     updateRoom();
+  } else if (m.t === "mirror") {
+    setMirrored(!!m.v);
   } else if (net.role === "host") {
     if (m.t === "in" && Array.isArray(m.a)) { Input.remote[2] = new Set(m.a.filter(a => ["up", "down", "left", "right"].includes(a))); }
     else if (m.t === "cont") game.continue_();
@@ -1256,11 +1258,16 @@ $("menu-btn").addEventListener("click", requestMenu);
 // Touch-Tasten spiegeln (für Links-/Rechtshänder), wird im Browser gemerkt
 let mirrored = false;
 try { mirrored = localStorage.getItem("rb-mirror") === "1"; } catch (e) {}
-$("swap-btn").addEventListener("click", () => {
-  mirrored = !mirrored;
+function setMirrored(on) {
+  mirrored = on;
   try { localStorage.setItem("rb-mirror", mirrored ? "1" : "0"); } catch (e) {}
   uiKey = "";
   updateUI();
+}
+// Online wird der Tausch an das andere Gerät geschickt, damit beide gleichzeitig wechseln
+$("swap-btn").addEventListener("click", () => {
+  setMirrored(!mirrored);
+  net.send({ t: "mirror", v: mirrored });
 });
 
 // Hinweis im Menü, welche Steuerung erkannt wurde
