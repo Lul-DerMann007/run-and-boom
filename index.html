@@ -411,7 +411,7 @@
 
 <div class="swipe-zone" id="swipe-zone" hidden>
   <div class="swipe-knob" id="swipe-knob" hidden><div class="swipe-dot" id="swipe-dot"></div></div>
-  <p class="swipe-hint" id="swipe-hint">RUNNER · Wischen ↑↓ = Spur · Finger halten und ←→ ziehen = Tempo</p>
+  <p class="swipe-hint" id="swipe-hint">RUNNER · kurz ↑↓ wischen = eine Spur · Finger halten, ←→ ziehen = Tempo (je weiter, desto schneller)</p>
 </div>
 <div class="pad pad-cannon" id="pad-cannon" data-pad="cannon" hidden>
   <span class="pad-label" id="pad-cannon-label">KANONE</span>
@@ -516,13 +516,31 @@ class Sprite {
 const Input = {
   local: new Map(),                       // token -> [spieler, aktion]
   remote: { 1: new Set(), 2: new Set() }, // vom anderen Gerät
+  axisLocal: new Map(),                   // token -> [spieler, -1..1]  (stufenloses Tempo per Wischen)
+  axisRemote: { 1: 0, 2: 0 },
   down(p, a) {
     for (const [q, b] of this.local.values()) if (q === p && b === a) return true;
     return this.remote[p].has(a);
   },
+  axis(p) {
+    let v = this.axisRemote[p] || 0;
+    for (const [q, x] of this.axisLocal.values()) if (q === p) v += x;
+    return Math.max(-1, Math.min(1, v));
+  },
   press(token, p, a) { this.local.set(token, [p, a]); inputChanged(); },
   release(token) { if (this.local.delete(token)) inputChanged(); },
-  clear() { this.local.clear(); this.remote[1].clear(); this.remote[2].clear(); inputChanged(); },
+  setAxis(token, p, v) {
+    if (v === 0) { if (!this.axisLocal.delete(token)) return; }
+    else this.axisLocal.set(token, [p, v]);
+    inputChanged();
+  },
+  releaseAll() { this.local.clear(); this.axisLocal.clear(); inputChanged(); },
+  clear() {
+    this.local.clear(); this.axisLocal.clear();
+    this.remote[1].clear(); this.remote[2].clear();
+    this.axisRemote[1] = 0; this.axisRemote[2] = 0;
+    inputChanged();
+  },
 };
 
 // ============================================================================
@@ -630,6 +648,7 @@ class Runner extends Sprite {
     super(game.all_sprites);
     this.game = game; this.color = color; this.player = player;
     this.key_states = { up: false, down: false };
+    this.pending = null;   // gemerkter Spurwechsel, falls der Runner gerade noch unterwegs ist
     this.img = color === "blue" ? "runner_blue" : "runner_red";
     this.rect = new Rect(0, 0, RUNNER_WIDTH, RUNNER_HEIGHT);
     this.current_lane = start_lane; this.target_lane = start_lane;
@@ -645,30 +664,28 @@ class Runner extends Sprite {
   get_keys() {
     this.acc = { x: 0, y: 0 };
     const p = this.player;
-    if (Input.down(p, "left")) this.acc.x = -RUNNER_ACC * RUNNER_LEFT_PACE_FACTOR;
-    if (Input.down(p, "right")) this.acc.x = RUNNER_ACC;
+    // Tempo: Tastatur = voll (wie A/D), Wischen = stufenlos nach Fingerabstand
+    let ax = Input.axis(p);
+    if (ax === 0) {
+      if (Input.down(p, "left")) ax = -1;
+      if (Input.down(p, "right")) ax = 1;
+    }
+    if (ax < 0) this.acc.x = ax * RUNNER_ACC * RUNNER_LEFT_PACE_FACTOR;
+    else if (ax > 0) this.acc.x = ax * RUNNER_ACC;
 
+    // Spurwechsel: ein Tastendruck/Wisch = eine Spur. Kommt er, während der Runner noch
+    // unterwegs ist, wird er gemerkt und nach dem Ankommen ausgeführt (max. einer).
+    for (const dir of ["up", "down"]) {
+      if (Input.down(p, dir)) {
+        if (!this.key_states[dir]) { this.key_states[dir] = true; this.pending = dir; }
+      } else this.key_states[dir] = false;
+    }
     const can_switch = Math.abs(this.current_lane - this.target_lane) < 0.1;
-
-    if (Input.down(p, "up")) {
-      if (!this.key_states.up) {
-        if (can_switch) {
-          const n = this.target_lane - 1;
-          if (n >= 0 && this.is_target_lane_safe(n)) { this.target_lane = n; SFX.lane_switch.play(); }
-        }
-        this.key_states.up = true;
-      }
-    } else this.key_states.up = false;
-
-    if (Input.down(p, "down")) {
-      if (!this.key_states.down) {
-        if (can_switch) {
-          const n = this.target_lane + 1;
-          if (n < NUM_LANES && this.is_target_lane_safe(n)) { this.target_lane = n; SFX.lane_switch.play(); }
-        }
-        this.key_states.down = true;
-      }
-    } else this.key_states.down = false;
+    if (this.pending && can_switch) {
+      const n = this.target_lane + (this.pending === "up" ? -1 : 1);
+      this.pending = null;
+      if (n >= 0 && n < NUM_LANES && this.is_target_lane_safe(n)) { this.target_lane = n; SFX.lane_switch.play(); }
+    }
   }
   update(dt) {
     this.get_keys();
@@ -1071,17 +1088,23 @@ const net = {
 
 // Eingaben des Gasts: bei jeder Änderung sofort, sonst regelmäßig wiederholt
 // (der schnelle Kanal ist ungeordnet, die Nummer q sortiert Veraltetes aus).
-let inputSeq = 0, lastInputSent = 0, lastSentInput = "", lastInputSeqSeen = 0;
+let inputSeq = 0, lastInputSent = 0, lastSentInput = "", lastInputSeqSeen = 0, inputDirty = false;
 const guestActions = () => [...new Set([...Input.local.values()].filter(([p]) => p === 2).map(([, a]) => a))].sort();
+const guestAxis = () => Math.round(Input.axis(2) * 50) / 50;
+const guestInputKey = () => guestActions().join(",") + "|" + guestAxis();
 function sendInput() {
-  const a = guestActions();
-  lastSentInput = a.join(",");
+  const a = guestActions(), x = guestAxis();
+  lastSentInput = a.join(",") + "|" + x;
   lastInputSent = performance.now();
-  net.sendFast({ t: "in", q: ++inputSeq, a });
+  inputDirty = false;
+  net.sendFast({ t: "in", q: ++inputSeq, a, x });
 }
 function inputChanged() {
   if (net.role !== "guest") return;
-  if (guestActions().join(",") !== lastSentInput) sendInput();
+  if (guestInputKey() === lastSentInput) return;
+  // Wischen liefert viele kleine Änderungen: höchstens alle 30 ms senden
+  if (performance.now() - lastInputSent >= 30) sendInput();
+  else inputDirty = true;
 }
 
 // Snapshot-Puffer des Gasts + Zwischenbilder
@@ -1190,6 +1213,7 @@ function onData(m) {
     if (m.t === "in" && Array.isArray(m.a)) {
       if (typeof m.q === "number") { if (m.q <= lastInputSeqSeen) return; lastInputSeqSeen = m.q; }
       Input.remote[2] = new Set(m.a.filter(a => ["up", "down", "left", "right"].includes(a)));
+      Input.axisRemote[2] = Math.max(-1, Math.min(1, Number(m.x) || 0));
     }
     else if (m.t === "cont") game.continue_();
     else if (m.t === "menu") requestMenu();
@@ -1349,7 +1373,7 @@ window.addEventListener("keydown", e => {
   }
 });
 window.addEventListener("keyup", e => Input.release("kb:" + e.code));
-window.addEventListener("blur", () => { for (const t of [...Input.local.keys()]) Input.release(t); });
+window.addEventListener("blur", () => { Input.releaseAll(); endAllSwipes(); });
 
 // Tippen = LEERTASTE. Kurze Sperre nach Rundenende, damit ein Tipp, der noch
 // für FEUER gedacht war, nicht sofort die nächste Runde startet.
@@ -1384,58 +1408,67 @@ document.querySelectorAll(".pad").forEach(pad => {
 });
 $("menu-btn").addEventListener("click", requestMenu);
 
-// Runner per Wischen: kurz hoch/runter wischen = eine Spur wechseln;
-// Finger halten und nach links/rechts ziehen = zurückfallen/beschleunigen (wie A/D halten).
+// Runner per Wischen.
+//  Tempo:  Finger halten und nach links/rechts ziehen. Stufenlos: bis 18 px passiert nichts
+//          (Totzone), bei 88 px Abstand ist es Vollgas (wie A/D halten). Zieht man weiter,
+//          rutscht der Ankerpunkt mit, damit ein Zurückziehen sofort bremst.
+//  Spur:   ein kurzer Wisch (mind. 36 px innerhalb von 220 ms) = genau eine Spur, danach
+//          260 ms Pause. Langsames Abdriften löst nichts aus. Jeder Finger ist eine eigene
+//          Geste, man kann also mit einem Finger das Tempo halten und mit einem zweiten wischen.
 const zone = $("swipe-zone"), knob = $("swipe-knob"), dot = $("swipe-dot");
-const SWIPE_H = 22, SWIPE_V = 30, PULSE_MS = 130;
-let sw = null, pulseN = 0, pulseBusyUntil = 0;
-function pulse(p, a) {
-  // Spurwechsel als kurzer "Tastendruck". Mehrere schnelle Wischer werden nacheinander
-  // abgespielt, damit jeder einzelne als neuer Druck zählt.
-  const now = performance.now(), start = Math.max(now, pulseBusyUntil);
-  pulseBusyUntil = start + PULSE_MS + 60;
-  setTimeout(() => {
-    const t = "swp:" + (++pulseN);
-    Input.press(t, p, a);
-    setTimeout(() => Input.release(t), PULSE_MS);
-  }, start - now);
+const DEAD = 18, RANGE = 70, FLICK = 36, FLICK_WIN = 220, LANE_COOLDOWN = 260, PULSE_MS = 130;
+const gestures = new Map();
+let lastLaneAt = 0, pulseN = 0;
+function lanePulse(p, dir) {
+  const t = "swp:" + (++pulseN);
+  Input.press(t, p, dir);
+  setTimeout(() => Input.release(t), PULSE_MS);
 }
-function endSwipe() {
-  if (!sw) return;
-  Input.release("swh");
-  sw = null;
-  knob.hidden = true;
+function endSwipe(id) {
+  const g = gestures.get(id);
+  if (!g) return;
+  gestures.delete(id);
+  Input.setAxis("swx:" + id, g.p, 0);
+  if (g.knob) knob.hidden = true;
 }
+function endAllSwipes() { for (const id of [...gestures.keys()]) endSwipe(id); }
 zone.addEventListener("pointerdown", e => {
-  if (sw) return;
   e.preventDefault();
   try { zone.setPointerCapture(e.pointerId); } catch (err) {}
-  const r = zone.getBoundingClientRect();
-  sw = { id: e.pointerId, x0: e.clientX, y0: e.clientY, ly: e.clientY, h: null, p: padPlayer("runner") };
-  knob.style.left = (e.clientX - r.left) + "px";
-  knob.style.top = (e.clientY - r.top) + "px";
-  dot.style.transform = "translate(0px, 0px)";
-  knob.hidden = false;
+  const g = { p: padPlayer("runner"), ax: e.clientX, samples: [{ t: performance.now(), y: e.clientY }], knob: gestures.size === 0 };
+  gestures.set(e.pointerId, g);
+  if (g.knob) {
+    const r = zone.getBoundingClientRect();
+    knob.style.left = (e.clientX - r.left) + "px";
+    knob.style.top = (e.clientY - r.top) + "px";
+    dot.style.transform = "translate(0px, 0px)";
+    knob.hidden = false;
+  }
   $("swipe-hint").classList.add("used");
 });
 zone.addEventListener("pointermove", e => {
-  if (!sw || e.pointerId !== sw.id) return;
-  const dx = e.clientX - sw.x0;
-  const h = dx > SWIPE_H ? "right" : dx < -SWIPE_H ? "left" : null;
-  if (h !== sw.h) {
-    Input.release("swh");
-    if (h) Input.press("swh", sw.p, h);
-    sw.h = h;
+  const g = gestures.get(e.pointerId);
+  if (!g) return;
+  // Tempo
+  const max = DEAD + RANGE;
+  let dx = e.clientX - g.ax;
+  if (dx > max) { g.ax = e.clientX - max; dx = max; }
+  else if (dx < -max) { g.ax = e.clientX + max; dx = -max; }
+  const mag = Math.max(0, Math.abs(dx) - DEAD) / RANGE;
+  Input.setAxis("swx:" + e.pointerId, g.p, Math.sign(dx) * mag);
+  // Spur
+  const now = performance.now();
+  g.samples.push({ t: now, y: e.clientY });
+  while (g.samples.length > 1 && now - g.samples[0].t > FLICK_WIN) g.samples.shift();
+  const dy = e.clientY - g.samples[0].y;
+  if (Math.abs(dy) >= FLICK && now - lastLaneAt >= LANE_COOLDOWN) {
+    lastLaneAt = now;
+    lanePulse(g.p, dy < 0 ? "up" : "down");
+    g.samples = [{ t: now, y: e.clientY }];
   }
-  const dy = e.clientY - sw.ly;
-  if (dy <= -SWIPE_V) { pulse(sw.p, "up"); sw.ly = e.clientY; }
-  else if (dy >= SWIPE_V) { pulse(sw.p, "down"); sw.ly = e.clientY; }
-  const clamp = v => Math.max(-30, Math.min(30, v));
-  dot.style.transform = `translate(${clamp(dx)}px, ${clamp(e.clientY - sw.y0)}px)`;
+  if (g.knob) dot.style.transform = `translate(${Math.round(Math.sign(dx) * mag * 30)}px, ${Math.max(-30, Math.min(30, dy))}px)`;
 });
-["pointerup", "pointercancel", "lostpointercapture"].forEach(ev => zone.addEventListener(ev, e => {
-  if (sw && e.pointerId === sw.id) endSwipe();
-}));
+["pointerup", "pointercancel", "lostpointercapture"].forEach(ev => zone.addEventListener(ev, e => endSwipe(e.pointerId)));
 zone.addEventListener("contextmenu", e => e.preventDefault());
 
 // Touch-Tasten spiegeln (für Links-/Rechtshänder), wird im Browser gemerkt
@@ -1456,7 +1489,7 @@ $("swap-btn").addEventListener("click", () => {
 // Hinweis im Menü, welche Steuerung erkannt wurde
 function refreshInputUI() {
   $("mode-hint").textContent = isTouch
-    ? "Touch erkannt: Als Runner wischst du (↑↓ Spur, Finger halten und ←→ ziehen fürs Tempo), als Kanone gibt es Tasten. Gerät quer halten."
+    ? "Touch erkannt: Als Runner wischst du kurz ↑↓ für eine Spur und ziehst mit gehaltenem Finger ←→ fürs Tempo. Als Kanone gibt es Tasten. Gerät quer halten."
     : "Tastatur erkannt: Blau spielt mit WASD, Rot mit den Pfeiltasten. Online steuerst du deine Figur mit beidem.";
 }
 refreshInputUI();
@@ -1494,7 +1527,7 @@ function updateUI() {
   const online = !!net.role;
   if (zone.hidden && showRunner) $("swipe-hint").classList.remove("used");
   zone.hidden = !showRunner;
-  if (!showRunner) endSwipe();
+  if (!showRunner) endAllSwipes();
   zone.classList.toggle("full", online);
   zone.classList.toggle("at-right", !online && mirrored);
   zone.style.setProperty("--pc", COLOR_VAR[runnerColor]);
@@ -1532,7 +1565,8 @@ function frame(now) {
     }
   } else {
     view = guestView(now);
-    if (now - lastInputSent > (lastSentInput ? 50 : 250)) sendInput();
+    const idle = lastSentInput === "" || lastSentInput === "|0";
+    if ((inputDirty && now - lastInputSent >= 30) || now - lastInputSent > (idle ? 250 : 50)) sendInput();
   }
   render(view);
   updateUI();
