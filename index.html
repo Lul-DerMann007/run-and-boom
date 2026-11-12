@@ -251,13 +251,27 @@
   .pad [data-act="right"] { grid-area: right; }
   .pad [data-act="fire"] { grid-area: fire; font-size: clamp(13px, 3vmin, 18px); letter-spacing: 0.06em; }
 
-  .menu-btn {
+  /* Seiten der Touch-Tasten (Standard online: Runner rechts; Kanone FEUER links, Spur rechts) */
+  .pad-runner.at-right { left: auto; right: max(10px, env(safe-area-inset-right, 0px)); }
+  .pad-cannon.at-left { right: auto; left: max(10px, env(safe-area-inset-left, 0px)); }
+  .pad-cannon.split.flip {
+    grid-template-columns: var(--btn) 1fr calc(var(--btn) * 1.6);
+    grid-template-areas: "up . fire" "down . fire";
+  }
+  .pad-cannon.split.flip .pad-label { left: 0; right: auto; }
+
+  .hud {
     position: fixed;
     left: 50%;
     bottom: max(10px, env(safe-area-inset-bottom, 0px));
     transform: translateX(-50%);
-    z-index: 5;
+    z-index: 6;
+    display: flex;
+    gap: 8px;
+  }
+  .hud button {
     font: 600 13px/1 var(--font-ui);
+    white-space: nowrap;
     color: var(--fg);
     background: rgba(8, 10, 16, 0.6);
     border: 1px solid var(--line);
@@ -362,7 +376,10 @@
   <button type="button" data-act="up" aria-label="Spur hoch">▲</button>
   <button type="button" data-act="down" aria-label="Spur runter">▼</button>
 </div>
-<button class="menu-btn" type="button" id="menu-btn" hidden>Menü</button>
+<div class="hud" id="hud" hidden>
+  <button type="button" id="swap-btn" aria-label="Touch-Tasten auf die andere Seite">⇄ Seiten tauschen</button>
+  <button type="button" id="menu-btn">Menü</button>
+</div>
 
 <div class="rotate">Bitte das Gerät quer halten.</div>
 
@@ -1236,6 +1253,16 @@ document.querySelectorAll(".pad").forEach(pad => {
 });
 $("menu-btn").addEventListener("click", requestMenu);
 
+// Touch-Tasten spiegeln (für Links-/Rechtshänder), wird im Browser gemerkt
+let mirrored = false;
+try { mirrored = localStorage.getItem("rb-mirror") === "1"; } catch (e) {}
+$("swap-btn").addEventListener("click", () => {
+  mirrored = !mirrored;
+  try { localStorage.setItem("rb-mirror", mirrored ? "1" : "0"); } catch (e) {}
+  uiKey = "";
+  updateUI();
+});
+
 // Hinweis im Menü, welche Steuerung erkannt wurde
 function refreshInputUI() {
   $("mode-hint").textContent = isTouch
@@ -1272,12 +1299,19 @@ function updateUI() {
   }
   const rp = $("pad-runner"), cp = $("pad-cannon");
   rp.hidden = !showRunner; cp.hidden = !showCannon;
-  cp.classList.toggle("split", !!net.role);   // lokal teilen sich zwei Spieler ein Gerät: dann bleibt alles rechts
+  // Online: Runner-Tasten rechts, Kanone FEUER links / Spur rechts. Lokal (zwei Spieler an
+  // einem Gerät): Runner links, Kanone rechts. "Seiten tauschen" spiegelt jeweils alles.
+  const online = !!net.role;
+  rp.classList.toggle("at-right", online ? !mirrored : mirrored);
+  cp.classList.toggle("split", online);
+  cp.classList.toggle("flip", online && mirrored);
+  cp.classList.toggle("at-left", !online && mirrored);
   rp.style.setProperty("--pc", COLOR_VAR[runnerColor]);
   cp.style.setProperty("--pc", COLOR_VAR[cannonColor]);
   $("pad-runner-label").textContent = `RUNNER · ${runnerColor === "blue" ? "BLAU" : "ROT"}`;
   $("pad-cannon-label").textContent = `KANONE · ${cannonColor === "blue" ? "BLAU" : "ROT"}`;
-  $("menu-btn").hidden = !isTouch || st === "menu";
+  $("hud").hidden = !isTouch || st === "menu";
+  $("swap-btn").hidden = st !== "running";
 }
 
 // ============================================================================
