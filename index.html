@@ -1,0 +1,1228 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Run & Boom">
+<meta name="theme-color" content="#0b0d12">
+<link rel="apple-touch-icon" href="assets/runner_blue.png">
+<link rel="icon" href="assets/runner_blue.png">
+<title>Run &amp; Boom</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap">
+<style>
+  /* Layout: one-screen arcade cabinet — 1200x720 playfield scaled to fit; lobby panel over the menu art; touch pads pinned to the player's side. Single dark look by choice. */
+  :root {
+    --bg: #0b0d12;
+    --panel: rgba(13, 16, 24, 0.86);
+    --line: #2a3142;
+    --fg: #e8ebf2;
+    --muted: #8a93a8;
+    --blue: #2f7dff;
+    --red: #ff3b3b;
+    --yellow: #ffe14a;
+    --font-ui: "Space Grotesk", "Segoe UI", Arial, sans-serif;
+    --gutter: 16px;
+    --reserve: 96px;
+    --btn: clamp(44px, 11vmin, 72px);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  html { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-ui);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    overflow: hidden;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: max(var(--gutter), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--gutter), env(safe-area-inset-right, 0px));
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body.touch { --gutter: 0px; --reserve: 0px; }
+
+  .stage {
+    position: relative;
+    width: min(100%, calc((100vh - var(--reserve)) * 5 / 3));
+    width: min(100%, calc((100dvh - var(--reserve) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) * 5 / 3));
+    aspect-ratio: 1200 / 720;
+    max-width: 100%;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    outline: none;
+    image-rendering: pixelated;
+    touch-action: none;
+  }
+
+  /* ---------- Lobby ---------- */
+  .lobby {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+  }
+  .panel {
+    width: min(420px, 100%);
+    max-height: 100%;
+    overflow: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: clamp(14px, 3vmin, 26px);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .panel h1 {
+    margin: 0;
+    font-size: clamp(26px, 5vmin, 40px);
+    letter-spacing: 0.04em;
+    text-align: center;
+    line-height: 1;
+  }
+  .panel h1 .amp { color: var(--yellow); }
+  .screen { display: flex; flex-direction: column; gap: 10px; }
+  .btn {
+    font: 600 16px/1 var(--font-ui);
+    color: var(--fg);
+    background: transparent;
+    border: 1px solid var(--line);
+    padding: 13px 16px;
+    cursor: pointer;
+    text-align: center;
+  }
+  .btn:hover { border-color: var(--muted); }
+  .btn:focus-visible, input:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+  .btn.primary { background: var(--yellow); color: #14120a; border-color: var(--yellow); }
+  .btn.ghost { border-color: transparent; color: var(--muted); padding-block: 8px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; min-width: 0; }
+  label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; letter-spacing: 0.04em; color: var(--muted); }
+  label.p1 { color: var(--blue); }
+  label.p2 { color: var(--red); }
+  input {
+    font: 500 16px var(--font-ui);
+    color: var(--fg);
+    background: #0b0d12;
+    border: 1px solid var(--line);
+    padding: 11px 12px;
+    width: 100%;
+  }
+  .code-input { font-size: 22px; letter-spacing: 0.3em; text-transform: uppercase; text-align: center; }
+  .eyebrow { margin: 0; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); text-align: center; }
+  .code { margin: 0; font-size: clamp(34px, 7vmin, 52px); font-weight: 700; letter-spacing: 0.22em; text-align: center; color: var(--yellow); font-variant-numeric: tabular-nums; }
+  .status { margin: 0; text-align: center; font-size: 15px; line-height: 1.4; }
+  .msg { margin: 0; font-size: 14px; line-height: 1.4; color: #ffb4b4; text-align: center; }
+  .hint-small { margin: 0; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.4; }
+
+  /* ---------- Steuerungs-Leiste (Desktop) ---------- */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 28px;
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+  }
+  body.touch .controls { display: none; }
+  .c1 { color: var(--blue); font-weight: 700; }
+  .c2 { color: var(--red); font-weight: 700; }
+  kbd {
+    font-family: inherit;
+    font-size: 12px;
+    border: 1px solid var(--muted);
+    border-bottom-width: 2px;
+    padding: 0 5px;
+    color: var(--fg);
+  }
+
+  /* ---------- Touch-Pads ---------- */
+  .pad {
+    position: fixed;
+    bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    display: grid;
+    gap: 6px;
+    z-index: 5;
+    touch-action: none;
+    --pc: var(--blue);
+  }
+  .pad-runner {
+    left: max(10px, env(safe-area-inset-left, 0px));
+    grid-template-columns: repeat(3, var(--btn));
+    grid-template-rows: repeat(3, var(--btn));
+    grid-template-areas: ". up ." "left . right" ". down .";
+  }
+  .pad-cannon {
+    right: max(10px, env(safe-area-inset-right, 0px));
+    grid-template-columns: calc(var(--btn) * 1.45) var(--btn);
+    grid-template-rows: var(--btn) var(--btn);
+    grid-template-areas: "fire up" "fire down";
+  }
+  .pad-label {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    padding: 3px 7px;
+    background: rgba(8, 10, 16, 0.7);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--pc);
+    text-shadow: 0 1px 2px #000;
+    pointer-events: none;
+  }
+  .pad button {
+    font: 700 clamp(16px, 4vmin, 24px)/1 var(--font-ui);
+    color: #fff;
+    background: rgba(8, 10, 16, 0.42);
+    border: 2px solid var(--pc);
+    border-radius: 14px;
+    padding: 0;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .pad button.on { background: var(--pc); }
+  .pad [data-act="up"] { grid-area: up; }
+  .pad [data-act="down"] { grid-area: down; }
+  .pad [data-act="left"] { grid-area: left; }
+  .pad [data-act="right"] { grid-area: right; }
+  .pad [data-act="fire"] { grid-area: fire; font-size: clamp(13px, 3vmin, 18px); letter-spacing: 0.06em; }
+
+  .menu-btn {
+    position: fixed;
+    left: 50%;
+    bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 5;
+    font: 600 13px/1 var(--font-ui);
+    color: var(--fg);
+    background: rgba(8, 10, 16, 0.6);
+    border: 1px solid var(--line);
+    padding: 9px 14px;
+  }
+
+  .rotate {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: var(--bg);
+    color: var(--fg);
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px;
+    font-size: 18px;
+    line-height: 1.5;
+  }
+  @media (orientation: portrait) and (max-width: 600px) {
+    body.touch .rotate { display: flex; }
+  }
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage">
+  <canvas id="game" width="1200" height="720" tabindex="0" aria-label="Run & Boom Spielfeld"></canvas>
+
+  <div class="lobby" id="lobby" hidden>
+    <div class="panel">
+      <h1>RUN <span class="amp">&amp;</span> BOOM</h1>
+
+      <div class="screen" data-screen="home">
+        <button class="btn" type="button" data-go="local">Auf einem Gerät spielen</button>
+        <button class="btn" type="button" data-go="host">Online-Spiel erstellen</button>
+        <button class="btn" type="button" data-go="join">Online beitreten</button>
+      </div>
+
+      <form class="screen" data-screen="local" id="form-local" hidden>
+        <label class="p1">Spieler 1 (Blau)<input id="name-p1" maxlength="15" placeholder="Spieler 1" autocomplete="off"></label>
+        <label class="p2">Spieler 2 (Rot)<input id="name-p2" maxlength="15" placeholder="Spieler 2" autocomplete="off"></label>
+        <button class="btn primary" type="submit">Los geht's</button>
+        <button class="btn ghost" type="button" data-go="home">Zurück</button>
+      </form>
+
+      <form class="screen" data-screen="host" id="form-host" hidden>
+        <label class="p1">Dein Name (du spielst Blau)<input id="name-host" maxlength="15" placeholder="Spieler 1" autocomplete="off"></label>
+        <button class="btn primary" type="submit">Raum erstellen</button>
+        <button class="btn ghost" type="button" data-go="home">Zurück</button>
+      </form>
+
+      <form class="screen" data-screen="join" id="form-join" hidden>
+        <label class="p2">Dein Name (du spielst Rot)<input id="name-join" maxlength="15" placeholder="Spieler 2" autocomplete="off"></label>
+        <label>Raumcode<input id="join-code" class="code-input" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCDE"></label>
+        <button class="btn primary" type="submit">Beitreten</button>
+        <button class="btn ghost" type="button" data-go="home">Zurück</button>
+      </form>
+
+      <div class="screen" data-screen="room" hidden>
+        <p class="eyebrow">Raumcode</p>
+        <p class="code" id="room-code">· · · · ·</p>
+        <button class="btn" type="button" id="btn-invite" hidden>Einladungslink teilen</button>
+        <p class="status" id="room-status">Verbinde …</p>
+        <button class="btn primary" type="button" id="btn-start" hidden>Match starten</button>
+        <button class="btn ghost" type="button" id="btn-leave">Verlassen</button>
+      </div>
+
+      <p class="msg" id="lobby-msg" hidden></p>
+    </div>
+  </div>
+</div>
+
+<div class="controls">
+  <span><span class="c1">Blau</span> <kbd>W</kbd> <kbd>S</kbd> Spur · <kbd>A</kbd> <kbd>D</kbd> Tempo · als Kanone <kbd>A</kbd> schießen</span>
+  <span><span class="c2">Rot</span> <kbd>↑</kbd> <kbd>↓</kbd> Spur · <kbd>←</kbd> <kbd>→</kbd> Tempo · als Kanone <kbd>←</kbd> schießen</span>
+  <span>Online: WASD oder Pfeiltasten für deine Figur · <kbd>Leertaste</kbd> weiter · <kbd>Esc</kbd> Menü</span>
+</div>
+
+<div class="pad pad-runner" id="pad-runner" data-pad="runner" hidden>
+  <span class="pad-label" id="pad-runner-label">RUNNER</span>
+  <button type="button" data-act="up" aria-label="Spur hoch">▲</button>
+  <button type="button" data-act="left" aria-label="Zurück">◀</button>
+  <button type="button" data-act="right" aria-label="Vorwärts">▶</button>
+  <button type="button" data-act="down" aria-label="Spur runter">▼</button>
+</div>
+<div class="pad pad-cannon" id="pad-cannon" data-pad="cannon" hidden>
+  <span class="pad-label" id="pad-cannon-label">KANONE</span>
+  <button type="button" data-act="fire" aria-label="Schießen">FEUER</button>
+  <button type="button" data-act="up" aria-label="Spur hoch">▲</button>
+  <button type="button" data-act="down" aria-label="Spur runter">▼</button>
+</div>
+<button class="menu-btn" type="button" id="menu-btn" hidden>Menü</button>
+
+<div class="rotate">Bitte das Gerät quer halten.</div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+(() => {
+// ============================================================================
+// settings.py
+// ============================================================================
+const WIDTH = 1200, HEIGHT = 720, FPS = 60;
+const WHITE = "rgb(255,255,255)", BLACK = "rgb(0,0,0)", GRAY = "rgb(128,128,128)",
+      BLUE = "rgb(0,100,255)", RED = "rgb(255,0,0)", YELLOW = "rgb(255,255,0)";
+
+const ROUNDS_TO_WIN_SET = 3, SETS_TO_WIN_MATCH = 3;
+
+const PLAYER_ACC = 2200, PLAYER_FRICTION = -6.0, LANE_SWITCH_SPEED = 25.0;
+const RUNNER_ACC = PLAYER_ACC, RUNNER_FRICTION = PLAYER_FRICTION;
+
+const RUNNER_SIZE = 70, RUNNER_WIDTH = 70, RUNNER_HEIGHT = 70;
+const RUNNER_MAX_X_RIGHT_FACTOR = 4 / 5, RUNNER_MAX_X_LEFT_FACTOR = 0.4, RUNNER_LEFT_PACE_FACTOR = 1.8;
+
+const CANNON_WIDTH = 90, CANNON_HEIGHT = 90, CANNON_COOLDOWN = 0.4, CANNON_OFFSET = 50;
+const PROJECTILE_SPEED = 1150, PROJECTILE_WIDTH = 24, PROJECTILE_HEIGHT = 24;
+
+const NUM_LANES = 8, LANE_HEIGHT = Math.floor(HEIGHT / NUM_LANES), SCROLL_SPEED = 400;
+
+const OBSTACLE_HEIGHT = 90, OBSTACLE_BASE_WIDTH = 60, OBSTACLE_TYPE_SHORT = 2, OBSTACLE_TYPE_LONG = 6, OBSTACLE_GAP = 250;
+
+const CHECKPOINT_DISTANCE = 8000, CHECKPOINT_WIDTH = 40, CHECKPOINT_HEIGHT = LANE_HEIGHT * NUM_LANES;
+
+const MAX_NAME_LENGTH = 15;
+
+// pygame Font(None, 36) / Font(None, 72) ~ FreeSansBold
+const FONT = "bold 24px Arial, Helvetica, sans-serif";
+const FONT_LARGE = "bold 49px Arial, Helvetica, sans-serif";
+
+const isTouch = matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
+if (isTouch) document.body.classList.add("touch");
+
+// ============================================================================
+// Helfer: pygame-ähnliche Rects (Integer-Koordinaten), Gruppen, Random
+// ============================================================================
+const int = Math.trunc;
+class Rect {
+  constructor(x, y, w, h) { this._x = int(x); this._y = int(y); this.w = w; this.h = h; }
+  get x() { return this._x; } set x(v) { this._x = int(v); }
+  get y() { return this._y; } set y(v) { this._y = int(v); }
+  get left() { return this._x; }
+  get right() { return this._x + this.w; }
+  get centery() { return this._y + int(this.h / 2); }
+  setCenter(cx, cy) { this._x = int(cx) - int(this.w / 2); this._y = int(cy) - int(this.h / 2); }
+  colliderect(o) { return this._x < o._x + o.w && this._x + this.w > o._x && this._y < o._y + o.h && this._y + this.h > o._y; }
+}
+const randint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const choice = arr => arr[Math.floor(Math.random() * arr.length)];
+const shuffle = arr => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
+
+class Group {
+  constructor() { this.list = []; }
+  add(s) { if (!this.list.includes(s)) { this.list.push(s); s.groups.push(this); } }
+  remove(s) { const i = this.list.indexOf(s); if (i >= 0) this.list.splice(i, 1); }
+  empty() { for (const s of this.list) s.groups = s.groups.filter(g => g !== this); this.list = []; }
+  sprites() { return this.list.slice(); }
+  update(dt) { for (const s of this.sprites()) s.update(dt); }
+}
+class Sprite {
+  constructor(...groups) { this.groups = []; for (const g of groups) g.add(this); }
+  kill() { for (const g of this.groups) g.remove(this); this.groups = []; }
+}
+
+// ============================================================================
+// Eingabe: pro Spieler (1 = Blau, 2 = Rot) die Aktionen up/down/left/right.
+// Quellen: Tastatur, Touch-Tasten und (online) die Eingaben des Mitspielers.
+// ============================================================================
+const Input = {
+  local: new Map(),                       // token -> [spieler, aktion]
+  remote: { 1: new Set(), 2: new Set() }, // vom anderen Gerät
+  down(p, a) {
+    for (const [q, b] of this.local.values()) if (q === p && b === a) return true;
+    return this.remote[p].has(a);
+  },
+  press(token, p, a) { this.local.set(token, [p, a]); inputChanged(); },
+  release(token) { if (this.local.delete(token)) inputChanged(); },
+  clear() { this.local.clear(); this.remote[1].clear(); this.remote[2].clear(); inputChanged(); },
+};
+
+// ============================================================================
+// Assets (Bilder + Sounds)
+// ============================================================================
+const IMAGE_FILES = ["background", "cannon_blue", "cannon_red", "checkpoint", "menu", "obstacle_long", "obstacle_short",
+  "projectile_blue", "projectile_red", "runner_blue", "runner_red", "victory_blue", "victory_red"];
+const SOUND_FILES = ["lane_switch", "hit", "shoot_blue", "shoot_red", "checkpoint", "music"];
+const images = {};
+const loadImage = name => new Promise(res => {
+  const img = new Image();
+  img.onload = () => res(img);
+  img.onerror = () => res(null);
+  img.src = `assets/${name}.png`;
+  images[name] = img;
+});
+
+let audioCtx = null;
+const soundData = {}, soundBuffers = {}, decoding = {};
+function decodeAll() {
+  if (!audioCtx) return;
+  for (const name of SOUND_FILES) {
+    if (!soundData[name] || decoding[name]) continue;
+    decoding[name] = true;
+    audioCtx.decodeAudioData(soundData[name].slice(0), buf => {
+      soundBuffers[name] = buf;
+      if (name === "music" && music.wanted) music.play();
+    }, () => {});
+  }
+}
+function initAudio() {
+  if (audioCtx) { if (audioCtx.state !== "running") audioCtx.resume().catch(() => {}); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  audioCtx = new AC();
+  decodeAll();
+}
+["pointerdown", "touchend", "click", "keydown"].forEach(ev => window.addEventListener(ev, initAudio, true));
+
+class Sound {
+  constructor(name, volume) { this.name = name; this.volume = volume; }
+  playLocal() {
+    const buf = soundBuffers[this.name];
+    if (!audioCtx || !buf) return;
+    const src = audioCtx.createBufferSource(), gain = audioCtx.createGain();
+    gain.gain.value = this.volume;
+    src.buffer = buf; src.connect(gain).connect(audioCtx.destination); src.start();
+  }
+  play() {
+    this.playLocal();
+    if (net.role === "host") net.send({ t: "fx", n: this.name });
+  }
+}
+const SFX = {
+  lane_switch: new Sound("lane_switch", 0.5),
+  hit: new Sound("hit", 0.6),
+  shoot_blue: new Sound("shoot_blue", 0.6),
+  shoot_red: new Sound("shoot_red", 0.6),
+  checkpoint: new Sound("checkpoint", 0.2),
+};
+const music = {
+  wanted: false, src: null, volume: 0.1,
+  play() {
+    this.stopSource(); this.wanted = true;
+    const buf = soundBuffers.music;
+    if (!audioCtx || !buf) return;
+    const src = audioCtx.createBufferSource(), gain = audioCtx.createGain();
+    gain.gain.value = this.volume;
+    src.buffer = buf; src.loop = true; src.connect(gain).connect(audioCtx.destination); src.start();
+    this.src = src;
+  },
+  stop() { this.wanted = false; this.stopSource(); },
+  stopSource() { if (this.src) { try { this.src.stop(); } catch (e) {} this.src = null; } },
+};
+
+// ============================================================================
+// player.py
+// ============================================================================
+class Player {
+  constructor(name, idx, color) {
+    this.name = name; this.round_score = 0; this.set_score = 0; this.score = 0;
+    this.color = color; this.role = null; this.idx = idx;
+  }
+  win_round() { this.round_score += 1; this.score += 1; }
+  win_set() { this.set_score += 1; }
+  switch_role() { this.role = this.role === "runner" ? "cannon" : "runner"; }
+  reset() { this.score = 0; this.round_score = 0; this.set_score = 0; this.role = null; }
+}
+
+// ============================================================================
+// runner.py
+// ============================================================================
+class Runner extends Sprite {
+  constructor(game, x, start_lane, player, color) {
+    super(game.all_sprites);
+    this.game = game; this.color = color; this.player = player;
+    this.key_states = { up: false, down: false };
+    this.img = color === "blue" ? "runner_blue" : "runner_red";
+    this.rect = new Rect(0, 0, RUNNER_WIDTH, RUNNER_HEIGHT);
+    this.current_lane = start_lane; this.target_lane = start_lane;
+    this.pos = { x, y: this.get_lane_y(start_lane) };
+    this.vel = { x: 0, y: 0 }; this.acc = { x: 0, y: 0 };
+  }
+  get_lane_y(lane) { return lane * LANE_HEIGHT + Math.floor(LANE_HEIGHT / 2); }
+  is_target_lane_safe(idx) {
+    const check = new Rect(0, 0, RUNNER_SIZE - 10, RUNNER_SIZE - 10);
+    check.setCenter(this.pos.x, this.get_lane_y(idx));
+    return !this.game.obstacles.list.some(o => check.colliderect(o.rect));
+  }
+  get_keys() {
+    this.acc = { x: 0, y: 0 };
+    const p = this.player;
+    if (Input.down(p, "left")) this.acc.x = -RUNNER_ACC * RUNNER_LEFT_PACE_FACTOR;
+    if (Input.down(p, "right")) this.acc.x = RUNNER_ACC;
+
+    const can_switch = Math.abs(this.current_lane - this.target_lane) < 0.1;
+
+    if (Input.down(p, "up")) {
+      if (!this.key_states.up) {
+        if (can_switch) {
+          const n = this.target_lane - 1;
+          if (n >= 0 && this.is_target_lane_safe(n)) { this.target_lane = n; SFX.lane_switch.play(); }
+        }
+        this.key_states.up = true;
+      }
+    } else this.key_states.up = false;
+
+    if (Input.down(p, "down")) {
+      if (!this.key_states.down) {
+        if (can_switch) {
+          const n = this.target_lane + 1;
+          if (n < NUM_LANES && this.is_target_lane_safe(n)) { this.target_lane = n; SFX.lane_switch.play(); }
+        }
+        this.key_states.down = true;
+      }
+    } else this.key_states.down = false;
+  }
+  update(dt) {
+    this.get_keys();
+    this.acc.x += this.vel.x * RUNNER_FRICTION;
+    this.vel.x += this.acc.x * dt;
+    this.pos.x += this.vel.x * dt + 0.5 * this.acc.x * dt * dt;
+
+    const target_y = this.get_lane_y(this.target_lane);
+    const diff = target_y - this.pos.y;
+    this.pos.y += diff * LANE_SWITCH_SPEED * dt;
+    if (Math.abs(diff) < 1) { this.pos.y = target_y; this.current_lane = this.target_lane; }
+
+    if (this.pos.x < -RUNNER_WIDTH * RUNNER_MAX_X_LEFT_FACTOR) { this.game.cannon_scores("pushed_off"); return; }
+    const max_x = WIDTH * RUNNER_MAX_X_RIGHT_FACTOR;
+    if (this.pos.x > max_x) { this.pos.x = max_x; this.vel.x = 0; }
+    this.rect.setCenter(this.pos.x, this.pos.y);
+  }
+  collide_with_obstacle(o) {
+    if (this.rect.colliderect(o.rect)) {
+      const overlap_left = this.rect.right - o.rect.left;
+      const overlap_right = o.rect.right - this.rect.left;
+      if (overlap_left < overlap_right) this.pos.x = o.rect.left - Math.floor(RUNNER_SIZE / 2);
+      else this.pos.x = o.rect.right + Math.floor(RUNNER_SIZE / 2);
+      this.vel.x = 0;
+      this.rect.setCenter(this.pos.x, this.pos.y);
+    }
+  }
+}
+
+// ============================================================================
+// cannon.py
+// ============================================================================
+class Cannon extends Sprite {
+  constructor(game, start_lane, player, color) {
+    super(game.all_sprites);
+    this.game = game; this.color = color; this.player = player;
+    this.img = color === "blue" ? "cannon_blue" : "cannon_red";
+    this.rect = new Rect(0, 0, CANNON_WIDTH, CANNON_HEIGHT);
+    this.current_lane = start_lane; this.target_lane = start_lane;
+    this.pos = { x: WIDTH - CANNON_OFFSET, y: this.get_lane_y(start_lane) };
+    this.can_shoot = true; this.cooldown_timer = 0; this.projectiles = [];
+    this.key_down_pressed = false; this.key_up_pressed = false;
+  }
+  get_lane_y(lane) { return lane * LANE_HEIGHT + Math.floor(LANE_HEIGHT / 2); }
+  get_keys() {
+    const p = this.player;
+    if (Input.down(p, "up")) {
+      if (!this.key_up_pressed) { if (this.target_lane > 0) this.target_lane -= 1; this.key_up_pressed = true; }
+    } else this.key_up_pressed = false;
+    if (Input.down(p, "down")) {
+      if (!this.key_down_pressed) { if (this.target_lane < NUM_LANES - 1) this.target_lane += 1; this.key_down_pressed = true; }
+    } else this.key_down_pressed = false;
+    if (Input.down(p, "left") && this.can_shoot) this.shoot();
+  }
+  shoot() {
+    if (this.can_shoot) {
+      this.projectiles.push(new Projectile(this.game, this.rect.left, this.rect.centery, this.color));
+      this.can_shoot = false;
+      this.cooldown_timer = CANNON_COOLDOWN;
+    }
+    (this.color === "blue" ? SFX.shoot_blue : SFX.shoot_red).play();
+  }
+  update(dt) {
+    this.get_keys();
+    if (!this.can_shoot) { this.cooldown_timer -= dt; if (this.cooldown_timer <= 0) this.can_shoot = true; }
+    const target_y = this.get_lane_y(this.target_lane);
+    const diff = target_y - this.pos.y;
+    this.pos.y += diff * (LANE_SWITCH_SPEED * 1.2) * dt;
+    if (Math.abs(diff) < 1) { this.pos.y = target_y; this.current_lane = this.target_lane; }
+    this.rect.setCenter(this.pos.x, this.pos.y);
+    this.projectiles = this.projectiles.filter(p => p.active);
+  }
+}
+
+// ============================================================================
+// projectile.py
+// ============================================================================
+class Projectile extends Sprite {
+  constructor(game, x, y, color) {
+    super(game.all_sprites, game.projectiles);
+    this.game = game; this.color = color;
+    this.img = color === "blue" ? "projectile_blue" : "projectile_red";
+    this.rect = new Rect(0, 0, PROJECTILE_WIDTH, PROJECTILE_HEIGHT);
+    this.rect.setCenter(x, y);
+    this.speed = -PROJECTILE_SPEED;
+    this.active = true;
+  }
+  update(dt) { this.rect.x += this.speed * dt; if (this.rect.right < 0) this.deactivate(); }
+  check_collision_with_runner(runner) {
+    if (this.active && this.rect.colliderect(runner.rect)) {
+      SFX.hit.play();
+      this.game.delay(500);   // pg.time.delay(500): Spiel friert kurz ein
+      this.game.cannon_scores("hit");
+      this.deactivate();
+    }
+  }
+  check_collision_with_obstacle(o) { if (this.active && this.rect.colliderect(o.rect)) this.deactivate(); }
+  deactivate() { this.active = false; this.kill(); }
+}
+
+// ============================================================================
+// obstacle.py (inkl. ObstacleFactory)
+// ============================================================================
+class Obstacle extends Sprite {
+  constructor(game, x, lane, obstacle_type) {
+    super(game.all_sprites, game.obstacles);
+    this.game = game;
+    this.img = obstacle_type === OBSTACLE_TYPE_SHORT ? "obstacle_short" : "obstacle_long";
+    this.rect = new Rect(0, 0, obstacle_type * OBSTACLE_BASE_WIDTH, OBSTACLE_HEIGHT);
+    this.rect.setCenter(x, lane * LANE_HEIGHT + Math.floor(LANE_HEIGHT / 2));
+  }
+  update(dt) { this.rect.x -= SCROLL_SPEED * dt; if (this.rect.right < 0) this.kill(); }
+}
+const ObstacleFactory = { create: (game, x, lane, type) => new Obstacle(game, x, lane, type) };
+
+// ============================================================================
+// checkpoint.py
+// ============================================================================
+class Checkpoint extends Sprite {
+  constructor(game, x) {
+    super(game.all_sprites);
+    this.game = game;
+    this.img = "checkpoint";
+    this.rect = new Rect(0, 0, CHECKPOINT_WIDTH, CHECKPOINT_HEIGHT);
+    this.rect.setCenter(x, Math.floor(HEIGHT / 2));
+    this.is_reached = false;
+  }
+  update(dt) { this.rect.x -= SCROLL_SPEED * dt; }
+  check_reached(runner) {
+    if (!this.is_reached && runner.pos.x >= this.rect.left) {
+      this.is_reached = true;
+      this.game.checkpoint_reached();
+    }
+  }
+}
+
+// ============================================================================
+// gameworld.py
+// ============================================================================
+class GameWorld {
+  constructor(game) {
+    this.game = game;
+    this.runner = null; this.cannon = null; this.checkpoint = null;
+    this.obstacle_spawn_timer = 0;
+    this.obstacle_spawn_interval = 0.55;
+  }
+  setup_round(runner_player, cannon_player, runner_color, cannon_color) {
+    this.game.all_sprites.empty(); this.game.obstacles.empty(); this.game.projectiles.empty();
+    const start_x = 100, start_lane = Math.floor(NUM_LANES / 2);
+    this.runner = new Runner(this.game, start_x, start_lane, runner_player, runner_color);
+    this.cannon = new Cannon(this.game, start_lane, cannon_player, cannon_color);
+    this.checkpoint = new Checkpoint(this.game, start_x + CHECKPOINT_DISTANCE);
+    this.obstacle_spawn_timer = 0;
+    this.spawn_initial_obstacles();
+  }
+  is_lane_free(lane, x_pos) {
+    const target_lane_y = lane * LANE_HEIGHT + Math.floor(LANE_HEIGHT / 2);
+    for (const o of this.game.obstacles.list) {
+      if (Math.abs(o.rect.centery - target_lane_y) < 5 && x_pos < o.rect.right + OBSTACLE_GAP) return false;
+    }
+    return true;
+  }
+  spawn_initial_obstacles() {
+    let current_x = 600;
+    while (current_x < WIDTH + 200) {
+      for (const lane of shuffle([...Array(NUM_LANES).keys()])) {
+        if (this.is_lane_free(lane, current_x)) {
+          ObstacleFactory.create(this.game, current_x, lane, choice([OBSTACLE_TYPE_SHORT, OBSTACLE_TYPE_LONG]));
+          break;
+        }
+      }
+      current_x += randint(300, 500);
+    }
+  }
+  spawn_obstacles(dt) {
+    this.obstacle_spawn_timer += dt;
+    if (this.obstacle_spawn_timer >= this.obstacle_spawn_interval) {
+      this.obstacle_spawn_timer = 0;
+      const spawn_x = WIDTH + 100;
+      for (let i = 0; i < 9; i++) {
+        const lane = randint(0, NUM_LANES - 1);
+        if (this.is_lane_free(lane, spawn_x)) {
+          ObstacleFactory.create(this.game, spawn_x, lane, choice([OBSTACLE_TYPE_SHORT, OBSTACLE_TYPE_LONG]));
+          break;
+        }
+      }
+    }
+  }
+  update(dt) {
+    this.game.all_sprites.update(dt);
+    this.spawn_obstacles(dt);
+    this.check_collisions();
+    if (this.checkpoint) this.checkpoint.check_reached(this.runner);
+  }
+  check_collisions() {
+    for (const o of this.game.obstacles.sprites()) if (this.runner.rect.colliderect(o.rect)) this.runner.collide_with_obstacle(o);
+    for (const p of this.game.projectiles.sprites()) p.check_collision_with_runner(this.runner);
+    for (const p of this.game.projectiles.sprites()) for (const o of this.game.obstacles.sprites()) p.check_collision_with_obstacle(o);
+  }
+  // Zeichenreihenfolge wie draw(): Hindernisse, Runner, Projektile, Checkpoint, Kanone
+  sprite_list() {
+    const out = [];
+    const add = s => out.push([s.img, s.rect.x, s.rect.y, s.rect.w, s.rect.h]);
+    this.game.obstacles.list.forEach(add);
+    if (this.runner) add(this.runner);
+    this.game.projectiles.list.forEach(add);
+    if (this.checkpoint) add(this.checkpoint);
+    if (this.cannon) add(this.cannon);
+    return out;
+  }
+}
+
+// ============================================================================
+// game.py (Spiellogik; Zeichnen passiert über einen "View"-Snapshot,
+// damit das zweite Gerät im Online-Modus genau dasselbe Bild zeichnet)
+// ============================================================================
+class Game {
+  constructor() {
+    this.all_sprites = new Group(); this.obstacles = new Group(); this.projectiles = new Group();
+    this.player1 = null; this.player2 = null;
+    this.current_runner = null; this.current_cannon = null;
+    this.player1_name = ""; this.player2_name = "";
+    this.current_round_num = 0;
+    this.game_state = "menu";
+    this.last_point_reason = null;
+    this.set_won_message = null;
+    this.world = new GameWorld(this);
+    this.delay_ms = 0;
+  }
+  delay(ms) { this.delay_ms += ms; }
+
+  start_game() {
+    this.player1 = new Player(this.player1_name, 1, "blue");
+    this.player2 = new Player(this.player2_name, 2, "red");
+    this.player1.reset(); this.player2.reset();
+    this.player1.role = "runner"; this.player2.role = "cannon";
+    this.current_runner = this.player1; this.current_cannon = this.player2;
+    this.current_round_num = 1;
+    this.start_round();
+  }
+  start_round() {
+    this.game_state = "running";
+    this.last_point_reason = null;
+    this.set_won_message = null;
+    this.world.setup_round(this.current_runner.idx, this.current_cannon.idx, this.current_runner.color, this.current_cannon.color);
+    music.play();
+  }
+  checkpoint_reached() {
+    SFX.checkpoint.play();
+    this.last_point_reason = null;
+    this.current_runner.win_round();
+    this.process_round_result(this.current_runner);
+  }
+  cannon_scores(reason = "hit") {
+    this.last_point_reason = reason;
+    this.current_cannon.win_round();
+    this.process_round_result(this.current_cannon);
+  }
+  process_round_result(winner) {
+    music.stop();
+    this.game_state = "round_end";
+    this.set_won_message = null;
+    if (winner.round_score >= ROUNDS_TO_WIN_SET) {
+      winner.win_set();
+      this.set_won_message = `${winner.name} GEWINNT DEN SATZ!`;
+      this.player1.round_score = 0; this.player2.round_score = 0;
+      if (winner.set_score >= SETS_TO_WIN_MATCH) this.game_state = "game_over";
+    }
+  }
+  next_round() { this.current_round_num += 1; this.switch_roles(); this.start_round(); }
+  switch_roles() {
+    this.player1.switch_role(); this.player2.switch_role();
+    if (this.player1.role === "runner") { this.current_runner = this.player1; this.current_cannon = this.player2; }
+    else { this.current_runner = this.player2; this.current_cannon = this.player1; }
+  }
+  reset_game() {
+    music.stop();
+    this.game_state = "menu";
+    this.player1 = null; this.player2 = null;
+    this.player1_name = ""; this.player2_name = "";
+    this.current_round_num = 0;
+    this.last_point_reason = null;
+  }
+  // LEERTASTE in round_end / game_over
+  continue_() {
+    if (this.game_state === "round_end") this.next_round();
+    else if (this.game_state === "game_over") this.reset_game();
+  }
+  update(dt) { if (this.game_state === "running") this.world.update(dt); }
+
+  snapshot() {
+    const v = { st: this.game_state, m: music.wanted };
+    if (this.player1 && this.player2) {
+      v.n1 = this.player1.name; v.n2 = this.player2.name;
+      v.s1 = [this.player1.set_score, this.player1.round_score];
+      v.s2 = [this.player2.set_score, this.player2.round_score];
+      v.rc = this.current_runner.color; v.cc = this.current_cannon.color;
+      v.lr = this.last_point_reason; v.sw = this.set_won_message;
+    }
+    if (v.st === "running" || v.st === "round_end") {
+      v.cr = this.world.checkpoint.is_reached;
+      v.spr = this.world.sprite_list();
+    }
+    return v;
+  }
+}
+
+// ============================================================================
+// Zeichnen (draw-Methoden aus game.py / gameworld.py)
+// ============================================================================
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+
+function text(str, font, color, x, y, align = "left", baseline = "top") {
+  ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = baseline;
+  ctx.fillText(str, x, y);
+}
+function overlay(alpha) { ctx.fillStyle = `rgba(0,0,0,${alpha / 255})`; ctx.fillRect(0, 0, WIDTH, HEIGHT); }
+
+function render(v) {
+  if (v.st === "running" || v.st === "round_end") {
+    ctx.drawImage(images.background, 0, 0, WIDTH, HEIGHT);
+    for (const [img, x, y, w, h] of v.spr || []) ctx.drawImage(images[img], x, y, w, h);
+  }
+  draw_ui(v);
+  if (v.st === "menu") ctx.drawImage(images.menu, 0, 0, WIDTH, HEIGHT);
+  else if (v.st === "round_end") draw_round_end(v);
+  else if (v.st === "game_over") draw_game_over(v);
+}
+function draw_ui(v) {
+  if (v.st !== "running" && v.st !== "round_end") return;
+  if (!v.n1) return;
+  text(`${v.n1} (BLAU)`, FONT, BLUE, 20, 20);
+  text(`Sätze: ${v.s1[0]} | Runden: ${v.s1[1]}`, FONT, BLACK, 20, 55);
+  text(`${v.n2} (ROT)`, FONT, RED, WIDTH - 250, 20);
+  text(`Sätze: ${v.s2[0]} | Runden: ${v.s2[1]}`, FONT, BLACK, WIDTH - 250, 55);
+  if (v.st === "running") {
+    text(`Satz-Ziel: ${ROUNDS_TO_WIN_SET} Runden`, FONT, GRAY, WIDTH / 2, 30, "center", "middle");
+    const rc = v.rc === "blue" ? "BLAU" : "ROT", cc = v.cc === "blue" ? "BLAU" : "ROT";
+    text(`Runner: ${rc} | Kanone: ${cc}`, FONT, YELLOW, WIDTH / 2, 70, "center", "middle");
+  }
+}
+function draw_round_end(v) {
+  overlay(200);
+  const runnerName = v.rc === "blue" ? v.n1 : v.n2;
+  let msg, color;
+  if (v.cr) {
+    msg = `${runnerName} erreicht das Ziel!`;
+    color = v.rc === "blue" ? BLUE : RED;
+  } else {
+    msg = v.lr === "pushed_off" ? "Runner vom Bildschirm gedrängt!" : `${runnerName} abgeschossen!`;
+    color = v.cc === "blue" ? BLUE : RED;
+  }
+  text(msg, FONT_LARGE, color, WIDTH / 2, HEIGHT / 2 - 80, "center", "middle");
+  if (v.sw) text(v.sw, FONT_LARGE, YELLOW, WIDTH / 2, HEIGHT / 2, "center", "middle");
+  else text(`Runden-Stand: ${v.s1[1]} : ${v.s2[1]}`, FONT, WHITE, WIDTH / 2, HEIGHT / 2, "center", "middle");
+  text(isTouch ? "TIPPEN fuer naechste Runde" : "LEERTASTE fuer naechste Runde", FONT, WHITE, WIDTH / 2, HEIGHT / 2 + 80, "center", "middle");
+}
+function draw_game_over(v) {
+  ctx.drawImage(v.s1[0] > v.s2[0] ? images.victory_blue : images.victory_red, 0, 0, WIDTH, HEIGHT);
+  text(`Satz-Endstand: ${v.s1[0]} : ${v.s2[0]}`, FONT, WHITE, WIDTH / 2, HEIGHT / 2, "center", "middle");
+}
+function draw_loading(done, total) {
+  ctx.fillStyle = BLACK; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  text(`Lädt … ${done}/${total}`, FONT, WHITE, WIDTH / 2, HEIGHT / 2, "center", "middle");
+}
+
+// ============================================================================
+// Online-Multiplayer (PeerJS / WebRTC). Das erstellende Gerät (Host, Blau)
+// rechnet das Spiel; das beitretende Gerät (Rot) schickt nur Eingaben und
+// zeichnet die Snapshots, die der Host 60x pro Sekunde sendet.
+// ============================================================================
+const PEER_PREFIX = "runboom-team04-";
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const makeCode = () => Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join("");
+
+const net = {
+  role: null, peer: null, conn: null, open: false,
+  code: "", myName: "", otherName: "", myPlayer: 1, timer: 0,
+  send(m) { if (this.conn && this.open) { try { this.conn.send(m); } catch (e) {} } },
+};
+let lastSentInput = "";
+function inputChanged() {
+  if (net.role !== "guest") return;
+  const acts = [...new Set([...Input.local.values()].filter(([p]) => p === 2).map(([, a]) => a))].sort();
+  const key = acts.join(",");
+  if (key === lastSentInput) return;
+  lastSentInput = key;
+  net.send({ t: "in", a: acts });
+}
+
+function createRoom(name) {
+  if (typeof Peer === "undefined") return showMsg("Der Online-Modus konnte nicht geladen werden. Prüfe die Internetverbindung und lade die Seite neu.");
+  net.role = "host"; net.myPlayer = 1; net.myName = name; net.otherName = "";
+  net.code = makeCode();
+  showScreen("room"); updateRoom();
+  const peer = new Peer(PEER_PREFIX + net.code, { debug: 0 });
+  net.peer = peer;
+  peer.on("open", () => updateRoom());
+  peer.on("connection", conn => {
+    if (net.conn) { conn.on("open", () => conn.close()); return; }
+    setupConn(conn);
+  });
+  peer.on("disconnected", () => { if (net.role === "host" && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } });
+  peer.on("error", err => {
+    if (err.type === "unavailable-id" && !net.conn) { peer.destroy(); net.role = null; return createRoom(name); }
+    if (!net.open) leaveOnline(`Raum konnte nicht erstellt werden (${err.type}). Bitte erneut versuchen.`);
+  });
+}
+function joinRoom(name, code) {
+  if (typeof Peer === "undefined") return showMsg("Der Online-Modus konnte nicht geladen werden. Prüfe die Internetverbindung und lade die Seite neu.");
+  net.role = "guest"; net.myPlayer = 2; net.myName = name; net.otherName = ""; net.code = code;
+  showScreen("room"); updateRoom();
+  const peer = new Peer({ debug: 0 });
+  net.peer = peer;
+  peer.on("open", () => {
+    setupConn(peer.connect(PEER_PREFIX + code, { reliable: true, serialization: "json" }));
+    net.timer = setTimeout(() => { if (!net.open) leaveOnline(`Keine Verbindung zu Raum ${code}. Code prüfen und erneut versuchen.`); }, 15000);
+  });
+  peer.on("error", err => {
+    if (err.type === "peer-unavailable") leaveOnline(`Raum ${code} wurde nicht gefunden. Code prüfen.`);
+    else if (!net.open) leaveOnline(`Verbindung fehlgeschlagen (${err.type}). Bitte erneut versuchen.`);
+  });
+}
+function setupConn(conn) {
+  net.conn = conn;
+  conn.on("open", () => {
+    net.open = true;
+    clearTimeout(net.timer);
+    net.send({ t: "hello", name: net.myName });
+    updateRoom();
+  });
+  conn.on("data", onData);
+  conn.on("close", () => leaveOnline("Die Verbindung zum Mitspieler wurde getrennt."));
+  conn.on("error", () => leaveOnline("Die Verbindung zum Mitspieler wurde getrennt."));
+}
+function onData(m) {
+  if (!m || typeof m !== "object") return;
+  if (m.t === "hello") {
+    net.otherName = String(m.name || "").slice(0, MAX_NAME_LENGTH) || (net.role === "host" ? "Spieler 2" : "Spieler 1");
+    updateRoom();
+  } else if (net.role === "host") {
+    if (m.t === "in" && Array.isArray(m.a)) { Input.remote[2] = new Set(m.a.filter(a => ["up", "down", "left", "right"].includes(a))); }
+    else if (m.t === "cont") game.continue_();
+    else if (m.t === "menu") requestMenu();
+  } else if (net.role === "guest") {
+    if (m.t === "s" && m.v) {
+      view = m.v;
+      if (view.m && !music.wanted) music.play();
+      else if (!view.m && music.wanted) music.stop();
+    } else if (m.t === "fx" && SFX[m.n]) SFX[m.n].playLocal();
+  }
+}
+function leaveOnline(msg) {
+  if (!net.role) return;
+  net.role = null; net.open = false;
+  clearTimeout(net.timer);
+  const { conn, peer } = net;
+  net.conn = null; net.peer = null;
+  try { conn && conn.close(); } catch (e) {}
+  try { peer && peer.destroy(); } catch (e) {}
+  Input.clear(); lastSentInput = "";
+  music.stop();
+  game.reset_game();
+  view = game.snapshot();
+  showScreen("home");
+  if (msg) showMsg(msg);
+}
+
+// ============================================================================
+// Lobby (Menü-Bildschirm)
+// ============================================================================
+const $ = id => document.getElementById(id);
+const lobby = $("lobby");
+let currentScreen = "home";
+function showScreen(name) {
+  currentScreen = name;
+  document.querySelectorAll("[data-screen]").forEach(el => { el.hidden = el.dataset.screen !== name; });
+  $("lobby-msg").hidden = true;
+  const focus = { local: "name-p1", host: "name-host", join: "name-join" }[name];
+  if (focus && !isTouch) setTimeout(() => $(focus).focus(), 0);
+}
+function showMsg(msg) { const el = $("lobby-msg"); el.textContent = msg; el.hidden = false; }
+function updateRoom() {
+  $("room-code").textContent = net.code ? net.code.split("").join(" ") : "· · · · ·";
+  const invite = $("btn-invite"), start = $("btn-start"), status = $("room-status");
+  if (net.role === "host") {
+    invite.hidden = !(net.peer && net.peer.open) || net.open;
+    start.hidden = !(net.open && net.otherName);
+    if (!net.peer || !net.peer.open) status.textContent = "Raum wird erstellt …";
+    else if (!net.open) status.textContent = "Warte auf Mitspieler. Schick ihm den Code oder den Einladungslink.";
+    else status.textContent = net.otherName ? `${net.otherName} ist verbunden und spielt Rot.` : "Mitspieler verbindet sich …";
+  } else if (net.role === "guest") {
+    invite.hidden = true; start.hidden = true;
+    status.textContent = !net.open ? "Verbinde …" : (net.otherName ? `Verbunden mit ${net.otherName}. ${net.otherName} startet das Match.` : "Verbunden.");
+  }
+}
+const nameOr = (id, fallback) => ($(id).value.trim().slice(0, MAX_NAME_LENGTH) || fallback);
+
+document.querySelectorAll("[data-go]").forEach(b => b.addEventListener("click", () => showScreen(b.dataset.go)));
+$("form-local").addEventListener("submit", e => {
+  e.preventDefault();
+  game.player1_name = nameOr("name-p1", "Spieler 1");
+  game.player2_name = nameOr("name-p2", "Spieler 2");
+  game.start_game();
+});
+$("form-host").addEventListener("submit", e => { e.preventDefault(); createRoom(nameOr("name-host", "Spieler 1")); });
+$("form-join").addEventListener("submit", e => {
+  e.preventDefault();
+  const code = $("join-code").value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (code.length !== 5) { showMsg("Der Raumcode hat 5 Zeichen."); return; }
+  joinRoom(nameOr("name-join", "Spieler 2"), code);
+});
+$("join-code").addEventListener("input", e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""); });
+$("btn-start").addEventListener("click", () => {
+  if (net.role !== "host" || !net.open) return;
+  game.player1_name = net.myName;
+  game.player2_name = net.otherName || "Spieler 2";
+  game.start_game();
+});
+$("btn-leave").addEventListener("click", () => { leaveOnline(""); });
+$("btn-invite").addEventListener("click", async () => {
+  const url = `${location.origin}${location.pathname}#${net.code}`;
+  const btn = $("btn-invite");
+  if (navigator.share) {
+    try { await navigator.share({ title: "Run & Boom", text: `Spiel mit mir Run & Boom! Raumcode: ${net.code}`, url }); return; } catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  try { await navigator.clipboard.writeText(url); btn.textContent = "Link kopiert"; }
+  catch (e) { btn.textContent = url; }
+  setTimeout(() => { btn.textContent = "Einladungslink teilen"; }, 2500);
+});
+
+// Einladungslink: …/#ABCDE öffnet direkt "Online beitreten"
+function readHash() {
+  const m = location.hash.match(/^#([A-Za-z0-9]{5})$/);
+  if (m && !net.role && view.st === "menu") {
+    $("join-code").value = m[1].toUpperCase();
+    showScreen("join");
+  }
+}
+window.addEventListener("hashchange", readHash);
+
+// ============================================================================
+// Steuerung: Tastatur, Touch-Tasten, Tippen
+// ============================================================================
+const game = new Game();
+let view = game.snapshot();
+let ready = false;
+
+const KEYMAP = {
+  KeyW: [1, "up"], KeyS: [1, "down"], KeyA: [1, "left"], KeyD: [1, "right"],
+  ArrowUp: [2, "up"], ArrowDown: [2, "down"], ArrowLeft: [2, "left"], ArrowRight: [2, "right"],
+};
+function pressContinue() {
+  if (net.role === "guest") net.send({ t: "cont" });
+  else game.continue_();
+}
+function requestMenu() {
+  if (net.role === "guest") { net.send({ t: "menu" }); return; }
+  if (game.game_state === "menu") return;
+  game.reset_game();
+  if (!net.role) showScreen("home");
+}
+window.addEventListener("keydown", e => {
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "BUTTON") && view.st === "menu") return;
+  if (!ready) return;
+  const k = KEYMAP[e.code];
+  if (k) {
+    e.preventDefault();
+    if (view.st !== "menu") Input.press("kb:" + e.code, net.role ? net.myPlayer : k[0], k[1]);
+  } else if (e.code === "Space") {
+    e.preventDefault();
+    if (!e.repeat && view.st !== "menu") pressContinue();
+  } else if (e.code === "Escape") {
+    requestMenu();
+  }
+});
+window.addEventListener("keyup", e => Input.release("kb:" + e.code));
+window.addEventListener("blur", () => { for (const t of [...Input.local.keys()]) Input.release(t); });
+
+// Tippen = LEERTASTE. Kurze Sperre nach Rundenende, damit ein Tipp, der noch
+// für FEUER gedacht war, nicht sofort die nächste Runde startet.
+canvas.addEventListener("pointerdown", e => {
+  if ((view.st === "round_end" || view.st === "game_over") && performance.now() - stChangedAt > 700) {
+    e.preventDefault();
+    pressContinue();
+  }
+});
+
+// Touch-Tasten
+function padPlayer(kind) {
+  if (net.role) return net.myPlayer;
+  const runnerIdx = view.rc === "red" ? 2 : 1;
+  return kind === "runner" ? runnerIdx : 3 - runnerIdx;
+}
+document.querySelectorAll(".pad").forEach(pad => {
+  pad.querySelectorAll("button").forEach(btn => {
+    const act = btn.dataset.act === "fire" ? "left" : btn.dataset.act;
+    const end = e => { Input.release("tp:" + e.pointerId); btn.classList.remove("on"); };
+    btn.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      try { btn.setPointerCapture(e.pointerId); } catch (err) {}
+      Input.press("tp:" + e.pointerId, padPlayer(pad.dataset.pad), act);
+      btn.classList.add("on");
+    });
+    btn.addEventListener("pointerup", end);
+    btn.addEventListener("pointercancel", end);
+    btn.addEventListener("lostpointercapture", end);
+    btn.addEventListener("contextmenu", e => e.preventDefault());
+  });
+});
+$("menu-btn").addEventListener("click", requestMenu);
+
+// Sichtbarkeit von Lobby, Touch-Tasten, Menü-Knopf
+let uiKey = "", prevSt = "", stChangedAt = 0;
+const COLOR_VAR = { blue: "var(--blue)", red: "var(--red)" };
+function updateUI() {
+  const st = view.st;
+  if (st !== prevSt) {
+    stChangedAt = performance.now();
+    if (st === "menu" && prevSt) {
+      Input.clear();
+      showScreen(net.role ? "room" : "home");
+      if (net.role) updateRoom();
+    }
+    prevSt = st;
+  }
+  const key = [st, net.role, view.rc].join("|");
+  if (key === uiKey) return;
+  uiKey = key;
+  lobby.hidden = st !== "menu";
+  const showPads = isTouch && st === "running";
+  const runnerColor = view.rc || "blue", cannonColor = view.cc || "red";
+  let showRunner = showPads, showCannon = showPads;
+  if (net.role) {
+    const meRunner = (runnerColor === "blue") === (net.myPlayer === 1);
+    showRunner = showPads && meRunner;
+    showCannon = showPads && !meRunner;
+  }
+  const rp = $("pad-runner"), cp = $("pad-cannon");
+  rp.hidden = !showRunner; cp.hidden = !showCannon;
+  rp.style.setProperty("--pc", COLOR_VAR[runnerColor]);
+  cp.style.setProperty("--pc", COLOR_VAR[cannonColor]);
+  $("pad-runner-label").textContent = `RUNNER · ${runnerColor === "blue" ? "BLAU" : "ROT"}`;
+  $("pad-cannon-label").textContent = `KANONE · ${cannonColor === "blue" ? "BLAU" : "ROT"}`;
+  $("menu-btn").hidden = !isTouch || st === "menu";
+}
+
+// ============================================================================
+// main.py: Loop mit festem 60-FPS-Takt (wie clock.tick(FPS))
+// ============================================================================
+const STEP = 1 / FPS;
+let last = performance.now(), acc = 0, frozenUntil = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (net.role !== "guest") {
+    if (now < frozenUntil) { last = now; return; }
+    acc += Math.min((now - last) / 1000, 0.25);
+    last = now;
+    while (acc >= STEP) {
+      acc -= STEP;
+      game.update(STEP);
+      if (game.delay_ms > 0) { frozenUntil = now + game.delay_ms; game.delay_ms = 0; acc = 0; return; }
+    }
+    view = game.snapshot();
+    if (net.role === "host") net.send({ t: "s", v: view });
+  }
+  render(view);
+  updateUI();
+}
+
+(async () => {
+  const total = IMAGE_FILES.length + SOUND_FILES.length;
+  let done = 0;
+  draw_loading(done, total);
+  const tick = () => draw_loading(++done, total);
+  await Promise.all([
+    ...IMAGE_FILES.map(n => loadImage(n).then(tick)),
+    ...SOUND_FILES.map(n => fetch(`assets/${n}.wav`).then(r => r.ok ? r.arrayBuffer() : null)
+      .then(b => { if (b) soundData[n] = b; }).catch(() => {}).then(tick)),
+  ]);
+  decodeAll();
+  ready = true;
+  showScreen("home");
+  readHash();
+  requestAnimationFrame(t => { last = t; frame(t); });
+})();
+})();
+</script>
+</body>
+</html>
