@@ -207,6 +207,16 @@
     grid-template-rows: var(--btn) var(--btn);
     grid-template-areas: "fire up" "fire down";
   }
+  /* Online als Kanone: FEUER links (linker Daumen), Spur hoch/runter rechts (rechter Daumen) */
+  .pad-cannon.split {
+    left: max(10px, env(safe-area-inset-left, 0px));
+    grid-template-columns: calc(var(--btn) * 1.6) 1fr var(--btn);
+    grid-template-rows: var(--btn) var(--btn);
+    grid-template-areas: "fire . up" "fire . down";
+    pointer-events: none;
+  }
+  .pad-cannon.split button { pointer-events: auto; }
+  .pad-cannon.split .pad-label { left: auto; right: 0; transform: none; }
   .pad-label {
     position: absolute;
     bottom: calc(100% + 6px);
@@ -1262,6 +1272,7 @@ function updateUI() {
   }
   const rp = $("pad-runner"), cp = $("pad-cannon");
   rp.hidden = !showRunner; cp.hidden = !showCannon;
+  cp.classList.toggle("split", !!net.role);   // lokal teilen sich zwei Spieler ein Gerät: dann bleibt alles rechts
   rp.style.setProperty("--pc", COLOR_VAR[runnerColor]);
   cp.style.setProperty("--pc", COLOR_VAR[cannonColor]);
   $("pad-runner-label").textContent = `RUNNER · ${runnerColor === "blue" ? "BLAU" : "ROT"}`;
