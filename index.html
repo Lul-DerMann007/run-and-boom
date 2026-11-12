@@ -131,6 +131,16 @@
   .code-input { font-size: 22px; letter-spacing: 0.3em; text-transform: uppercase; text-align: center; }
   .eyebrow { margin: 0; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); text-align: center; }
   .code { margin: 0; font-size: clamp(34px, 7vmin, 52px); font-weight: 700; letter-spacing: 0.22em; text-align: center; color: var(--yellow); font-variant-numeric: tabular-nums; }
+  .room-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 18px; }
+  .room-code-box { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 220px; }
+  .qr {
+    width: clamp(120px, 30vmin, 170px);
+    aspect-ratio: 1;
+    background: #fff;
+    padding: 6px;
+    flex: none;
+  }
+  .qr svg { display: block; width: 100%; height: 100%; }
   .status { margin: 0; text-align: center; font-size: 15px; line-height: 1.4; }
   .msg { margin: 0; font-size: 14px; line-height: 1.4; color: #ffb4b4; text-align: center; }
   .hint-small { margin: 0; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.4; }
@@ -281,8 +291,14 @@
       </form>
 
       <div class="screen" data-screen="room" hidden>
-        <p class="eyebrow">Raumcode</p>
-        <p class="code" id="room-code">· · · · ·</p>
+        <div class="room-top">
+          <div class="qr" id="room-qr" hidden></div>
+          <div class="room-code-box">
+            <p class="eyebrow">Raumcode</p>
+            <p class="code" id="room-code">· · · · ·</p>
+            <p class="hint-small" id="qr-hint" hidden>QR-Code mit der Handy-Kamera scannen, um direkt beizutreten.</p>
+          </div>
+        </div>
         <button class="btn" type="button" id="btn-invite" hidden>Einladungslink teilen</button>
         <p class="status" id="room-status">Verbinde …</p>
         <button class="btn primary" type="button" id="btn-start" hidden>Match starten</button>
@@ -318,6 +334,7 @@
 <div class="rotate">Bitte das Gerät quer halten.</div>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script>
 (() => {
 // ============================================================================
@@ -1021,11 +1038,22 @@ function showMsg(msg) { const el = $("lobby-msg"); el.textContent = msg; el.hidd
 function updateRoom() {
   $("room-code").textContent = net.code ? net.code.split("").join(" ") : "· · · · ·";
   const invite = $("btn-invite"), start = $("btn-start"), status = $("room-status");
+  const showQr = net.role === "host" && !!(net.peer && net.peer.open) && !net.open;
+  const qrBox = $("room-qr");
+  if (showQr && qrBox.dataset.code !== net.code && typeof qrcode !== "undefined") {
+    const qr = qrcode(0, "M");
+    qr.addData(inviteUrl());
+    qr.make();
+    qrBox.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+    qrBox.dataset.code = net.code;
+  }
+  qrBox.hidden = !showQr || qrBox.dataset.code !== net.code;
+  $("qr-hint").hidden = qrBox.hidden;
   if (net.role === "host") {
     invite.hidden = !(net.peer && net.peer.open) || net.open;
     start.hidden = !(net.open && net.otherName);
     if (!net.peer || !net.peer.open) status.textContent = "Raum wird erstellt …";
-    else if (!net.open) status.textContent = "Warte auf Mitspieler. Schick ihm den Code oder den Einladungslink.";
+    else if (!net.open) status.textContent = "Warte auf Mitspieler …";
     else status.textContent = net.otherName ? `${net.otherName} ist verbunden und spielt Rot.` : "Mitspieler verbindet sich …";
   } else if (net.role === "guest") {
     invite.hidden = true; start.hidden = true;
@@ -1056,8 +1084,9 @@ $("btn-start").addEventListener("click", () => {
   game.start_game();
 });
 $("btn-leave").addEventListener("click", () => { leaveOnline(""); });
+function inviteUrl() { return `${location.origin}${location.pathname}#${net.code}`; }
 $("btn-invite").addEventListener("click", async () => {
-  const url = `${location.origin}${location.pathname}#${net.code}`;
+  const url = inviteUrl();
   const btn = $("btn-invite");
   if (navigator.share) {
     try { await navigator.share({ title: "Run & Boom", text: `Spiel mit mir Run & Boom! Raumcode: ${net.code}`, url }); return; } catch (e) { if (e && e.name === "AbortError") return; }
