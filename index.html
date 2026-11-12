@@ -268,6 +268,7 @@
         <button class="btn" type="button" data-go="local">Auf einem Gerät spielen</button>
         <button class="btn" type="button" data-go="host">Online-Spiel erstellen</button>
         <button class="btn" type="button" data-go="join">Online beitreten</button>
+        <p class="hint-small" id="mode-hint"></p>
       </div>
 
       <form class="screen" data-screen="local" id="form-local" hidden>
@@ -367,8 +368,22 @@ const MAX_NAME_LENGTH = 15;
 const FONT = "bold 24px Arial, Helvetica, sans-serif";
 const FONT_LARGE = "bold 49px Arial, Helvetica, sans-serif";
 
-const isTouch = matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
-if (isTouch) document.body.classList.add("touch");
+// Steuerung automatisch erkennen: Startwert nach Hauptzeigegerät (iPhone/iPad = Finger,
+// Laptop = Maus/Touchpad). Danach entscheidet, was wirklich benutzt wird:
+// Finger auf dem Bildschirm -> Touch-Tasten, Spieltaste auf der Tastatur -> Tastatur.
+let isTouch = matchMedia("(pointer: coarse)").matches;
+function setTouchMode(on) {
+  if (on === isTouch) return;
+  isTouch = on;
+  document.body.classList.toggle("touch", on);
+  if (typeof refreshInputUI === "function") refreshInputUI();
+}
+document.body.classList.toggle("touch", isTouch);
+window.addEventListener("pointerdown", e => { if (e.pointerType === "touch") setTouchMode(true); }, true);
+window.addEventListener("keydown", e => {
+  if (["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)
+      && !(e.target && e.target.tagName === "INPUT")) setTouchMode(false);
+}, true);
 
 // ============================================================================
 // Helfer: pygame-ähnliche Rects (Integer-Koordinaten), Gruppen, Random
@@ -1177,6 +1192,14 @@ document.querySelectorAll(".pad").forEach(pad => {
 });
 $("menu-btn").addEventListener("click", requestMenu);
 
+// Hinweis im Menü, welche Steuerung erkannt wurde
+function refreshInputUI() {
+  $("mode-hint").textContent = isTouch
+    ? "Touch erkannt: Die Tasten erscheinen auf der Seite deiner Figur. Gerät quer halten."
+    : "Tastatur erkannt: Blau spielt mit WASD, Rot mit den Pfeiltasten. Online steuerst du deine Figur mit beidem.";
+}
+refreshInputUI();
+
 // Sichtbarkeit von Lobby, Touch-Tasten, Menü-Knopf
 let uiKey = "", prevSt = "", stChangedAt = 0;
 const COLOR_VAR = { blue: "var(--blue)", red: "var(--red)" };
@@ -1191,7 +1214,7 @@ function updateUI() {
     }
     prevSt = st;
   }
-  const key = [st, net.role, view.rc].join("|");
+  const key = [st, net.role, view.rc, isTouch].join("|");
   if (key === uiKey) return;
   uiKey = key;
   lobby.hidden = st !== "menu";
