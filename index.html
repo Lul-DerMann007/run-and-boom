@@ -195,11 +195,60 @@
     touch-action: none;
     --pc: var(--blue);
   }
-  .pad-runner {
-    left: max(10px, env(safe-area-inset-left, 0px));
-    grid-template-columns: repeat(3, var(--btn));
-    grid-template-rows: repeat(3, var(--btn));
-    grid-template-areas: ". up ." "left . right" ". down .";
+  /* Runner: Wischfläche statt Pfeiltasten (online ganzer Bildschirm, auf einem Gerät eine Hälfte) */
+  .swipe-zone {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 50%;
+    z-index: 4;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    --pc: var(--blue);
+  }
+  .swipe-zone.full { width: auto; right: 0; }
+  .swipe-zone.at-right { left: auto; right: 0; }
+  .swipe-hint {
+    position: absolute;
+    left: 50%;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 54px);
+    transform: translateX(-50%);
+    margin: 0;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--fg);
+    background: rgba(8, 10, 16, 0.6);
+    border: 1px solid var(--pc);
+    white-space: nowrap;
+    pointer-events: none;
+    transition: opacity 0.4s;
+  }
+  .swipe-hint.used { opacity: 0; }
+  .swipe-knob {
+    position: absolute;
+    width: 76px;
+    height: 76px;
+    margin: -38px 0 0 -38px;
+    border-radius: 50%;
+    border: 2px solid var(--pc);
+    background: rgba(255, 255, 255, 0.08);
+    pointer-events: none;
+  }
+  .swipe-dot {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 26px;
+    height: 26px;
+    margin: -13px 0 0 -13px;
+    border-radius: 50%;
+    background: var(--pc);
+    opacity: 0.85;
   }
   .pad-cannon {
     right: max(10px, env(safe-area-inset-right, 0px));
@@ -247,12 +296,9 @@
   .pad button.on { background: var(--pc); }
   .pad [data-act="up"] { grid-area: up; }
   .pad [data-act="down"] { grid-area: down; }
-  .pad [data-act="left"] { grid-area: left; }
-  .pad [data-act="right"] { grid-area: right; }
   .pad [data-act="fire"] { grid-area: fire; font-size: clamp(13px, 3vmin, 18px); letter-spacing: 0.06em; }
 
-  /* Seiten der Touch-Tasten (Standard online: Runner rechts; Kanone FEUER links, Spur rechts) */
-  .pad-runner.at-right { left: auto; right: max(10px, env(safe-area-inset-right, 0px)); }
+  /* Seiten der Touch-Tasten (Standard online: Kanone FEUER links, Spur rechts) */
   .pad-cannon.at-left { right: auto; left: max(10px, env(safe-area-inset-left, 0px)); }
   .pad-cannon.split.flip {
     grid-template-columns: var(--btn) 1fr calc(var(--btn) * 1.6);
@@ -363,12 +409,9 @@
   <span>Online: WASD oder Pfeiltasten für deine Figur · <kbd>Leertaste</kbd> weiter · <kbd>Esc</kbd> Menü</span>
 </div>
 
-<div class="pad pad-runner" id="pad-runner" data-pad="runner" hidden>
-  <span class="pad-label" id="pad-runner-label">RUNNER</span>
-  <button type="button" data-act="up" aria-label="Spur hoch">▲</button>
-  <button type="button" data-act="left" aria-label="Zurück">◀</button>
-  <button type="button" data-act="right" aria-label="Vorwärts">▶</button>
-  <button type="button" data-act="down" aria-label="Spur runter">▼</button>
+<div class="swipe-zone" id="swipe-zone" hidden>
+  <div class="swipe-knob" id="swipe-knob" hidden><div class="swipe-dot" id="swipe-dot"></div></div>
+  <p class="swipe-hint" id="swipe-hint">RUNNER · Wischen ↑↓ = Spur · Finger halten und ←→ ziehen = Tempo</p>
 </div>
 <div class="pad pad-cannon" id="pad-cannon" data-pad="cannon" hidden>
   <span class="pad-label" id="pad-cannon-label">KANONE</span>
@@ -460,8 +503,9 @@ class Group {
   sprites() { return this.list.slice(); }
   update(dt) { for (const s of this.sprites()) s.update(dt); }
 }
+let spriteSeq = 0;   // eindeutige IDs, damit das zweite Gerät Bewegungen glätten kann
 class Sprite {
-  constructor(...groups) { this.groups = []; for (const g of groups) g.add(this); }
+  constructor(...groups) { this.id = ++spriteSeq; this.groups = []; for (const g of groups) g.add(this); }
   kill() { for (const g of this.groups) g.remove(this); this.groups = []; }
 }
 
@@ -488,6 +532,16 @@ const IMAGE_FILES = ["background", "cannon_blue", "cannon_red", "checkpoint", "m
   "projectile_blue", "projectile_red", "runner_blue", "runner_red", "victory_blue", "victory_red"];
 const SOUND_FILES = ["lane_switch", "hit", "shoot_blue", "shoot_red", "checkpoint", "music"];
 const images = {};
+// Sprite-Bilder mit ihrer Zeichengröße (aus settings.py)
+const SPRITE_IMGS = [
+  ["runner_blue", RUNNER_WIDTH, RUNNER_HEIGHT], ["runner_red", RUNNER_WIDTH, RUNNER_HEIGHT],
+  ["cannon_blue", CANNON_WIDTH, CANNON_HEIGHT], ["cannon_red", CANNON_WIDTH, CANNON_HEIGHT],
+  ["projectile_blue", PROJECTILE_WIDTH, PROJECTILE_HEIGHT], ["projectile_red", PROJECTILE_WIDTH, PROJECTILE_HEIGHT],
+  ["obstacle_short", OBSTACLE_TYPE_SHORT * OBSTACLE_BASE_WIDTH, OBSTACLE_HEIGHT],
+  ["obstacle_long", OBSTACLE_TYPE_LONG * OBSTACLE_BASE_WIDTH, OBSTACLE_HEIGHT],
+  ["checkpoint", CHECKPOINT_WIDTH, CHECKPOINT_HEIGHT],
+];
+const SPRITE_IDX = Object.fromEntries(SPRITE_IMGS.map(([n], i) => [n, i]));
 const loadImage = name => new Promise(res => {
   const img = new Image();
   img.onload = () => res(img);
@@ -815,9 +869,10 @@ class GameWorld {
     for (const p of this.game.projectiles.sprites()) for (const o of this.game.obstacles.sprites()) p.check_collision_with_obstacle(o);
   }
   // Zeichenreihenfolge wie draw(): Hindernisse, Runner, Projektile, Checkpoint, Kanone
+  // Kompaktes Format [id, bild, x, y] – klein genug für 30 Snapshots pro Sekunde übers Netz
   sprite_list() {
     const out = [];
-    const add = s => out.push([s.img, s.rect.x, s.rect.y, s.rect.w, s.rect.h]);
+    const add = s => out.push([s.id, SPRITE_IDX[s.img], s.rect.x, s.rect.y]);
     this.game.obstacles.list.forEach(add);
     if (this.runner) add(this.runner);
     this.game.projectiles.list.forEach(add);
@@ -906,7 +961,7 @@ class Game {
   update(dt) { if (this.game_state === "running") this.world.update(dt); }
 
   snapshot() {
-    const v = { st: this.game_state, m: music.wanted };
+    const v = { t: Math.round(performance.now()), st: this.game_state, m: music.wanted };
     if (this.player1 && this.player2) {
       v.n1 = this.player1.name; v.n2 = this.player2.name;
       v.s1 = [this.player1.set_score, this.player1.round_score];
@@ -938,7 +993,10 @@ function overlay(alpha) { ctx.fillStyle = `rgba(0,0,0,${alpha / 255})`; ctx.fill
 function render(v) {
   if (v.st === "running" || v.st === "round_end") {
     ctx.drawImage(images.background, 0, 0, WIDTH, HEIGHT);
-    for (const [img, x, y, w, h] of v.spr || []) ctx.drawImage(images[img], x, y, w, h);
+    for (const [, k, x, y] of v.spr || []) {
+      const [name, w, h] = SPRITE_IMGS[k];
+      ctx.drawImage(images[name], x, y, w, h);
+    }
   }
   draw_ui(v);
   if (v.st === "menu") ctx.drawImage(images.menu, 0, 0, WIDTH, HEIGHT);
@@ -986,25 +1044,81 @@ function draw_loading(done, total) {
 // ============================================================================
 // Online-Multiplayer (PeerJS / WebRTC). Das erstellende Gerät (Host, Blau)
 // rechnet das Spiel; das beitretende Gerät (Rot) schickt nur Eingaben und
-// zeichnet die Snapshots, die der Host 60x pro Sekunde sendet.
+// zeichnet die Snapshots, die der Host 30x pro Sekunde sendet.
+//
+// Zwei Kanäle: "ctrl" (geordnet, für Namen/Weiter/Menü/Sounds) und "fast"
+// (ungeordnet, für Spielbild und Eingaben). Auf "fast" wird nur gesendet,
+// wenn der Sendepuffer leer genug ist – sonst wird ein Bild übersprungen,
+// statt dass sich Verzögerung aufstaut. Das zweite Gerät zeichnet mit ~90 ms
+// Puffer und rechnet Zwischenbilder, damit die Bewegung flüssig bleibt.
 // ============================================================================
 const PEER_PREFIX = "runboom-team04-";
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const makeCode = () => Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join("");
 
 const net = {
-  role: null, peer: null, conn: null, open: false,
+  role: null, peer: null, conn: null, fast: null, open: false,
   code: "", myName: "", otherName: "", myPlayer: 1, timer: 0,
   send(m) { if (this.conn && this.open) { try { this.conn.send(m); } catch (e) {} } },
+  sendFast(m) {
+    const c = this.fast && this.fast.open ? this.fast : (this.open ? this.conn : null);
+    if (!c) return;
+    const dc = c.dataChannel;
+    if (dc && dc.bufferedAmount > 16384) return;   // Netz kommt nicht hinterher: dieses Paket auslassen
+    try { c.send(m); } catch (e) {}
+  },
 };
-let lastSentInput = "";
+
+// Eingaben des Gasts: bei jeder Änderung sofort, sonst regelmäßig wiederholt
+// (der schnelle Kanal ist ungeordnet, die Nummer q sortiert Veraltetes aus).
+let inputSeq = 0, lastInputSent = 0, lastSentInput = "", lastInputSeqSeen = 0;
+const guestActions = () => [...new Set([...Input.local.values()].filter(([p]) => p === 2).map(([, a]) => a))].sort();
+function sendInput() {
+  const a = guestActions();
+  lastSentInput = a.join(",");
+  lastInputSent = performance.now();
+  net.sendFast({ t: "in", q: ++inputSeq, a });
+}
 function inputChanged() {
   if (net.role !== "guest") return;
-  const acts = [...new Set([...Input.local.values()].filter(([p]) => p === 2).map(([, a]) => a))].sort();
-  const key = acts.join(",");
-  if (key === lastSentInput) return;
-  lastSentInput = key;
-  net.send({ t: "in", a: acts });
+  if (guestActions().join(",") !== lastSentInput) sendInput();
+}
+
+// Snapshot-Puffer des Gasts + Zwischenbilder
+const INTERP_DELAY = 90;
+let snaps = [], clockOffset = null;
+function onSnapshot(v) {
+  const sample = v.t - performance.now();
+  if (clockOffset === null || sample > clockOffset) clockOffset = sample;
+  else clockOffset += (sample - clockOffset) * 0.02;
+  if (snaps.length && v.t <= snaps[snaps.length - 1].t) {
+    if (snaps.some(s => s.t === v.t)) return;
+    snaps.push(v); snaps.sort((a, b) => a.t - b.t);
+  } else snaps.push(v);
+  if (snaps.length > 30) snaps.splice(0, snaps.length - 30);
+  const newest = snaps[snaps.length - 1];
+  if (newest.m && !music.wanted) music.play();
+  else if (!newest.m && music.wanted) music.stop();
+}
+function guestView(now) {
+  if (!snaps.length) return view;
+  const rt = now + clockOffset - INTERP_DELAY;
+  const i = snaps.findIndex(s => s.t >= rt);
+  if (i === -1) return snaps[snaps.length - 1];
+  if (i === 0) return snaps[0];
+  if (i > 1) snaps.splice(0, i - 1);
+  const a = snaps[0], b = snaps[1];
+  if (a.st !== b.st || !a.spr || !b.spr) return b;
+  const k = (rt - a.t) / (b.t - a.t);
+  const prev = new Map(a.spr.map(s => [s[0], s]));
+  const spr = b.spr.map(s => {
+    const p = prev.get(s[0]);
+    if (!p) return s;
+    const dx = s[2] - p[2], dy = s[3] - p[3];
+    if (Math.abs(dx) > 300 || Math.abs(dy) > 300) return s;
+    return [s[0], s[1], p[2] + dx * k, p[3] + dy * k];
+  });
+  return Object.assign({}, b, { spr });
 }
 
 function createRoom(name) {
@@ -1016,7 +1130,13 @@ function createRoom(name) {
   net.peer = peer;
   peer.on("open", () => updateRoom());
   peer.on("connection", conn => {
+    if (conn.label === "fast") {
+      if (net.fast) { conn.on("open", () => conn.close()); return; }
+      setupFast(conn);
+      return;
+    }
     if (net.conn) { conn.on("open", () => conn.close()); return; }
+    lastInputSeqSeen = 0;
     setupConn(conn);
   });
   peer.on("disconnected", () => { if (net.role === "host" && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } });
@@ -1032,7 +1152,8 @@ function joinRoom(name, code) {
   const peer = new Peer({ debug: 0 });
   net.peer = peer;
   peer.on("open", () => {
-    setupConn(peer.connect(PEER_PREFIX + code, { reliable: true, serialization: "json" }));
+    setupConn(peer.connect(PEER_PREFIX + code, { label: "ctrl", reliable: true, serialization: "json" }));
+    setupFast(peer.connect(PEER_PREFIX + code, { label: "fast", reliable: false, serialization: "json" }));
     net.timer = setTimeout(() => { if (!net.open) leaveOnline(`Keine Verbindung zu Raum ${code}. Code prüfen und erneut versuchen.`); }, 15000);
   });
   peer.on("error", err => {
@@ -1052,6 +1173,12 @@ function setupConn(conn) {
   conn.on("close", () => leaveOnline("Die Verbindung zum Mitspieler wurde getrennt."));
   conn.on("error", () => leaveOnline("Die Verbindung zum Mitspieler wurde getrennt."));
 }
+function setupFast(conn) {
+  net.fast = conn;
+  conn.on("data", onData);
+  conn.on("close", () => { if (net.fast === conn) net.fast = null; });
+  conn.on("error", () => {});
+}
 function onData(m) {
   if (!m || typeof m !== "object") return;
   if (m.t === "hello") {
@@ -1060,23 +1187,25 @@ function onData(m) {
   } else if (m.t === "mirror") {
     setMirrored(!!m.v);
   } else if (net.role === "host") {
-    if (m.t === "in" && Array.isArray(m.a)) { Input.remote[2] = new Set(m.a.filter(a => ["up", "down", "left", "right"].includes(a))); }
+    if (m.t === "in" && Array.isArray(m.a)) {
+      if (typeof m.q === "number") { if (m.q <= lastInputSeqSeen) return; lastInputSeqSeen = m.q; }
+      Input.remote[2] = new Set(m.a.filter(a => ["up", "down", "left", "right"].includes(a)));
+    }
     else if (m.t === "cont") game.continue_();
     else if (m.t === "menu") requestMenu();
   } else if (net.role === "guest") {
-    if (m.t === "s" && m.v) {
-      view = m.v;
-      if (view.m && !music.wanted) music.play();
-      else if (!view.m && music.wanted) music.stop();
-    } else if (m.t === "fx" && SFX[m.n]) SFX[m.n].playLocal();
+    if (m.t === "s" && m.v && typeof m.v.t === "number") onSnapshot(m.v);
+    else if (m.t === "fx" && SFX[m.n]) SFX[m.n].playLocal();
   }
 }
 function leaveOnline(msg) {
   if (!net.role) return;
   net.role = null; net.open = false;
   clearTimeout(net.timer);
-  const { conn, peer } = net;
-  net.conn = null; net.peer = null;
+  const { conn, fast, peer } = net;
+  net.conn = null; net.fast = null; net.peer = null;
+  snaps = []; clockOffset = null;
+  try { fast && fast.close(); } catch (e) {}
   try { conn && conn.close(); } catch (e) {}
   try { peer && peer.destroy(); } catch (e) {}
   Input.clear(); lastSentInput = "";
@@ -1255,6 +1384,60 @@ document.querySelectorAll(".pad").forEach(pad => {
 });
 $("menu-btn").addEventListener("click", requestMenu);
 
+// Runner per Wischen: kurz hoch/runter wischen = eine Spur wechseln;
+// Finger halten und nach links/rechts ziehen = zurückfallen/beschleunigen (wie A/D halten).
+const zone = $("swipe-zone"), knob = $("swipe-knob"), dot = $("swipe-dot");
+const SWIPE_H = 22, SWIPE_V = 30, PULSE_MS = 130;
+let sw = null, pulseN = 0, pulseBusyUntil = 0;
+function pulse(p, a) {
+  // Spurwechsel als kurzer "Tastendruck". Mehrere schnelle Wischer werden nacheinander
+  // abgespielt, damit jeder einzelne als neuer Druck zählt.
+  const now = performance.now(), start = Math.max(now, pulseBusyUntil);
+  pulseBusyUntil = start + PULSE_MS + 60;
+  setTimeout(() => {
+    const t = "swp:" + (++pulseN);
+    Input.press(t, p, a);
+    setTimeout(() => Input.release(t), PULSE_MS);
+  }, start - now);
+}
+function endSwipe() {
+  if (!sw) return;
+  Input.release("swh");
+  sw = null;
+  knob.hidden = true;
+}
+zone.addEventListener("pointerdown", e => {
+  if (sw) return;
+  e.preventDefault();
+  try { zone.setPointerCapture(e.pointerId); } catch (err) {}
+  const r = zone.getBoundingClientRect();
+  sw = { id: e.pointerId, x0: e.clientX, y0: e.clientY, ly: e.clientY, h: null, p: padPlayer("runner") };
+  knob.style.left = (e.clientX - r.left) + "px";
+  knob.style.top = (e.clientY - r.top) + "px";
+  dot.style.transform = "translate(0px, 0px)";
+  knob.hidden = false;
+  $("swipe-hint").classList.add("used");
+});
+zone.addEventListener("pointermove", e => {
+  if (!sw || e.pointerId !== sw.id) return;
+  const dx = e.clientX - sw.x0;
+  const h = dx > SWIPE_H ? "right" : dx < -SWIPE_H ? "left" : null;
+  if (h !== sw.h) {
+    Input.release("swh");
+    if (h) Input.press("swh", sw.p, h);
+    sw.h = h;
+  }
+  const dy = e.clientY - sw.ly;
+  if (dy <= -SWIPE_V) { pulse(sw.p, "up"); sw.ly = e.clientY; }
+  else if (dy >= SWIPE_V) { pulse(sw.p, "down"); sw.ly = e.clientY; }
+  const clamp = v => Math.max(-30, Math.min(30, v));
+  dot.style.transform = `translate(${clamp(dx)}px, ${clamp(e.clientY - sw.y0)}px)`;
+});
+["pointerup", "pointercancel", "lostpointercapture"].forEach(ev => zone.addEventListener(ev, e => {
+  if (sw && e.pointerId === sw.id) endSwipe();
+}));
+zone.addEventListener("contextmenu", e => e.preventDefault());
+
 // Touch-Tasten spiegeln (für Links-/Rechtshänder), wird im Browser gemerkt
 let mirrored = false;
 try { mirrored = localStorage.getItem("rb-mirror") === "1"; } catch (e) {}
@@ -1273,7 +1456,7 @@ $("swap-btn").addEventListener("click", () => {
 // Hinweis im Menü, welche Steuerung erkannt wurde
 function refreshInputUI() {
   $("mode-hint").textContent = isTouch
-    ? "Touch erkannt: Die Tasten erscheinen auf der Seite deiner Figur. Gerät quer halten."
+    ? "Touch erkannt: Als Runner wischst du (↑↓ Spur, Finger halten und ←→ ziehen fürs Tempo), als Kanone gibt es Tasten. Gerät quer halten."
     : "Tastatur erkannt: Blau spielt mit WASD, Rot mit den Pfeiltasten. Online steuerst du deine Figur mit beidem.";
 }
 refreshInputUI();
@@ -1304,18 +1487,22 @@ function updateUI() {
     showRunner = showPads && meRunner;
     showCannon = showPads && !meRunner;
   }
-  const rp = $("pad-runner"), cp = $("pad-cannon");
-  rp.hidden = !showRunner; cp.hidden = !showCannon;
-  // Online: Runner-Tasten rechts, Kanone FEUER links / Spur rechts. Lokal (zwei Spieler an
-  // einem Gerät): Runner links, Kanone rechts. "Seiten tauschen" spiegelt jeweils alles.
+  const cp = $("pad-cannon");
+  // Runner-Wischfläche: online der ganze Bildschirm; auf einem Gerät die linke Hälfte
+  // (Kanone rechts). "Seiten tauschen" spiegelt; online betrifft das nur die Kanone
+  // (FEUER links / Spur rechts ⇄ umgekehrt).
   const online = !!net.role;
-  rp.classList.toggle("at-right", online ? !mirrored : mirrored);
+  if (zone.hidden && showRunner) $("swipe-hint").classList.remove("used");
+  zone.hidden = !showRunner;
+  if (!showRunner) endSwipe();
+  zone.classList.toggle("full", online);
+  zone.classList.toggle("at-right", !online && mirrored);
+  zone.style.setProperty("--pc", COLOR_VAR[runnerColor]);
+  cp.hidden = !showCannon;
   cp.classList.toggle("split", online);
   cp.classList.toggle("flip", online && mirrored);
   cp.classList.toggle("at-left", !online && mirrored);
-  rp.style.setProperty("--pc", COLOR_VAR[runnerColor]);
   cp.style.setProperty("--pc", COLOR_VAR[cannonColor]);
-  $("pad-runner-label").textContent = `RUNNER · ${runnerColor === "blue" ? "BLAU" : "ROT"}`;
   $("pad-cannon-label").textContent = `KANONE · ${cannonColor === "blue" ? "BLAU" : "ROT"}`;
   $("hud").hidden = !isTouch || st === "menu";
   $("swap-btn").hidden = st !== "running";
@@ -1325,7 +1512,7 @@ function updateUI() {
 // main.py: Loop mit festem 60-FPS-Takt (wie clock.tick(FPS))
 // ============================================================================
 const STEP = 1 / FPS;
-let last = performance.now(), acc = 0, frozenUntil = 0;
+let last = performance.now(), acc = 0, frozenUntil = 0, lastSnapSent = 0, lastSentSt = "";
 function frame(now) {
   requestAnimationFrame(frame);
   if (net.role !== "guest") {
@@ -1338,7 +1525,14 @@ function frame(now) {
       if (game.delay_ms > 0) { frozenUntil = now + game.delay_ms; game.delay_ms = 0; acc = 0; return; }
     }
     view = game.snapshot();
-    if (net.role === "host") net.send({ t: "s", v: view });
+    // 30 Bilder pro Sekunde; ein Zustandswechsel (z. B. Rundenende) geht sofort raus
+    if (net.role === "host" && (now - lastSnapSent >= 33 || view.st !== lastSentSt)) {
+      lastSnapSent = now; lastSentSt = view.st;
+      net.sendFast({ t: "s", v: view });
+    }
+  } else {
+    view = guestView(now);
+    if (now - lastInputSent > (lastSentInput ? 50 : 250)) sendInput();
   }
   render(view);
   updateUI();
