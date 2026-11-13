@@ -256,26 +256,35 @@
     transition: opacity 0.4s;
   }
   .swipe-hint.used { opacity: 0; }
-  .swipe-knob {
+  /* kurzer Pfeil an der Fingerstelle als Rückmeldung für einen erkannten Wisch */
+  .swipe-fx {
     position: absolute;
-    width: 76px;
-    height: 76px;
-    margin: -38px 0 0 -38px;
-    border-radius: 50%;
-    border: 2px solid var(--pc);
-    background: rgba(255, 255, 255, 0.08);
+    width: 0;
+    height: 0;
     pointer-events: none;
+    opacity: 0;
+    --r: 0deg;
   }
-  .swipe-dot {
+  .swipe-fx::before {
+    content: "";
     position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 26px;
-    height: 26px;
-    margin: -13px 0 0 -13px;
-    border-radius: 50%;
-    background: var(--pc);
-    opacity: 0.85;
+    left: -14px;
+    top: -14px;
+    width: 22px;
+    height: 22px;
+    border-top: 5px solid var(--pc);
+    border-right: 5px solid var(--pc);
+    border-radius: 3px;
+    transform: rotate(calc(var(--r) - 45deg));
+  }
+  .swipe-fx[data-dir="right"] { --r: 90deg; --tx: 26px; --ty: 0px; }
+  .swipe-fx[data-dir="left"] { --r: -90deg; --tx: -26px; --ty: 0px; }
+  .swipe-fx[data-dir="up"] { --r: 0deg; --tx: 0px; --ty: -26px; }
+  .swipe-fx[data-dir="down"] { --r: 180deg; --tx: 0px; --ty: 26px; }
+  .swipe-fx.go { animation: swipe-fx 0.32s ease-out; }
+  @keyframes swipe-fx {
+    from { opacity: 0.95; translate: 0 0; }
+    to { opacity: 0; translate: var(--tx) var(--ty); }
   }
   .pad-cannon {
     right: max(10px, env(safe-area-inset-right, 0px));
@@ -440,8 +449,8 @@
 </div>
 
 <div class="swipe-zone" id="swipe-zone" hidden>
-  <div class="swipe-knob" id="swipe-knob" hidden><div class="swipe-dot" id="swipe-dot"></div></div>
-  <p class="swipe-hint" id="swipe-hint">RUNNER · kurz ↑↓ wischen = eine Spur · Finger halten, ←→ ziehen = Tempo (je weiter, desto schneller)</p>
+  <div class="swipe-fx" id="swipe-fx"></div>
+  <p class="swipe-hint" id="swipe-hint">RUNNER · wischen: ↑↓ Spur · → Sprint · ← zurück</p>
 </div>
 <div class="pad pad-cannon" id="pad-cannon" data-pad="cannon" hidden>
   <span class="pad-label" id="pad-cannon-label">KANONE</span>
@@ -1476,65 +1485,84 @@ document.querySelectorAll(".pad").forEach(pad => {
 });
 $("menu-btn").addEventListener("click", requestMenu);
 
-// Runner per Wischen.
-//  Tempo:  Finger halten und nach links/rechts ziehen. Stufenlos: bis 18 px passiert nichts
-//          (Totzone), bei 88 px Abstand ist es Vollgas (wie A/D halten). Zieht man weiter,
-//          rutscht der Ankerpunkt mit, damit ein Zurückziehen sofort bremst.
-//  Spur:   ein kurzer Wisch (mind. 36 px innerhalb von 220 ms) = genau eine Spur, danach
-//          260 ms Pause. Langsames Abdriften löst nichts aus. Jeder Finger ist eine eigene
-//          Geste, man kann also mit einem Finger das Tempo halten und mit einem zweiten wischen.
-const zone = $("swipe-zone"), knob = $("swipe-knob"), dot = $("swipe-dot");
-const DEAD = 18, RANGE = 70, FLICK = 36, FLICK_WIN = 220, LANE_COOLDOWN = 260, PULSE_MS = 130;
+// Runner per Wischen (wie Temple Run): kein Stick, nur Gesten.
+//  ↑/↓ wischen  = genau eine Spur.
+//  →/← wischen  = Sprint nach vorn bzw. zurückweichen (kurzer Schub, gleitet sanft aus).
+//                 Bleibt der Finger nach dem Wisch liegen, läuft der Runner weiter in die Richtung.
+//  Ein Wisch zählt erst ab 30 px in höchstens 200 ms, langsames Abdriften löst nichts aus.
+//  Die Richtung entscheidet die stärkere Achse. Jeder Finger ist eine eigene Geste.
+const zone = $("swipe-zone"), swipeFx = $("swipe-fx");
+const FLICK = 30, FLICK_WIN = 200, LANE_COOLDOWN = 220, PULSE_MS = 130, DASH_MS = 260;
 const gestures = new Map();
-let lastLaneAt = 0, pulseN = 0;
+let lastLaneAt = 0, swipeN = 0;
 function lanePulse(p, dir) {
-  const t = "swp:" + (++pulseN);
+  const t = "swp:" + (++swipeN);
   Input.press(t, p, dir);
   setTimeout(() => Input.release(t), PULSE_MS);
+}
+function showSwipeFx(x, y, dir) {
+  const r = zone.getBoundingClientRect();
+  swipeFx.style.left = (x - r.left) + "px";
+  swipeFx.style.top = (y - r.top) + "px";
+  swipeFx.dataset.dir = dir;
+  swipeFx.classList.remove("go");
+  void swipeFx.offsetWidth;   // Animation neu starten
+  swipeFx.classList.add("go");
+}
+// Schub nach links/rechts: eigener Token je Wisch, damit ein ausklingender Schub keinen neuen stört
+function stopDash(g) {
+  if (!g.dash) return;
+  clearTimeout(g.dash.timer);
+  Input.setAxis(g.dash.token, g.p, 0);
+  g.dash = null;
+}
+function startDash(g, dir) {
+  stopDash(g);
+  const token = "swx:" + (++swipeN);
+  g.dash = { token, dir, until: performance.now() + DASH_MS, timer: 0 };
+  Input.setAxis(token, g.p, dir);
 }
 function endSwipe(id) {
   const g = gestures.get(id);
   if (!g) return;
   gestures.delete(id);
-  Input.setAxis("swx:" + id, g.p, 0);
-  if (g.knob) knob.hidden = true;
+  if (!g.dash) return;
+  // Kurzer Wisch: Schub läuft noch zu Ende, dann gleitet der Runner aus
+  const left = g.dash.until - performance.now();
+  if (left > 0) { const d = g.dash; d.timer = setTimeout(() => Input.setAxis(d.token, g.p, 0), left); }
+  else stopDash(g);
 }
-function endAllSwipes() { for (const id of [...gestures.keys()]) endSwipe(id); }
+function endAllSwipes() {
+  for (const g of gestures.values()) stopDash(g);
+  gestures.clear();
+}
 zone.addEventListener("pointerdown", e => {
   e.preventDefault();
   try { zone.setPointerCapture(e.pointerId); } catch (err) {}
-  const g = { p: padPlayer("runner"), ax: e.clientX, samples: [{ t: performance.now(), y: e.clientY }], knob: gestures.size === 0 };
-  gestures.set(e.pointerId, g);
-  if (g.knob) {
-    const r = zone.getBoundingClientRect();
-    knob.style.left = (e.clientX - r.left) + "px";
-    knob.style.top = (e.clientY - r.top) + "px";
-    dot.style.transform = "translate(0px, 0px)";
-    knob.hidden = false;
-  }
+  gestures.set(e.pointerId, { p: padPlayer("runner"), samples: [{ t: performance.now(), x: e.clientX, y: e.clientY }], dash: null });
   $("swipe-hint").classList.add("used");
 });
 zone.addEventListener("pointermove", e => {
   const g = gestures.get(e.pointerId);
   if (!g) return;
-  // Tempo
-  const max = DEAD + RANGE;
-  let dx = e.clientX - g.ax;
-  if (dx > max) { g.ax = e.clientX - max; dx = max; }
-  else if (dx < -max) { g.ax = e.clientX + max; dx = -max; }
-  const mag = Math.max(0, Math.abs(dx) - DEAD) / RANGE;
-  Input.setAxis("swx:" + e.pointerId, g.p, Math.sign(dx) * mag);
-  // Spur
   const now = performance.now();
-  g.samples.push({ t: now, y: e.clientY });
+  g.samples.push({ t: now, x: e.clientX, y: e.clientY });
   while (g.samples.length > 1 && now - g.samples[0].t > FLICK_WIN) g.samples.shift();
-  const dy = e.clientY - g.samples[0].y;
-  if (Math.abs(dy) >= FLICK && now - lastLaneAt >= LANE_COOLDOWN) {
+  const dx = e.clientX - g.samples[0].x, dy = e.clientY - g.samples[0].y;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < FLICK) return;
+  if (Math.abs(dy) >= Math.abs(dx)) {
+    if (now - lastLaneAt < LANE_COOLDOWN) return;
     lastLaneAt = now;
     lanePulse(g.p, dy < 0 ? "up" : "down");
-    g.samples = [{ t: now, y: e.clientY }];
+    showSwipeFx(e.clientX, e.clientY, dy < 0 ? "up" : "down");
+  } else {
+    const dir = dx > 0 ? 1 : -1;
+    if (!g.dash || g.dash.dir !== dir) {
+      startDash(g, dir);
+      showSwipeFx(e.clientX, e.clientY, dir > 0 ? "right" : "left");
+    }
   }
-  if (g.knob) dot.style.transform = `translate(${Math.round(Math.sign(dx) * mag * 30)}px, ${Math.max(-30, Math.min(30, dy))}px)`;
+  g.samples = [{ t: now, x: e.clientX, y: e.clientY }];
 });
 ["pointerup", "pointercancel", "lostpointercapture"].forEach(ev => zone.addEventListener(ev, e => endSwipe(e.pointerId)));
 zone.addEventListener("contextmenu", e => e.preventDefault());
